@@ -1,0 +1,2 @@
+/home/godwin/Desktop/24/android/app/.cxx/debug/3f52643m/x86_64/CMakeFiles/edit_cache.dir
+/home/godwin/Desktop/24/android/app/.cxx/debug/3f52643m/x86_64/CMakeFiles/rebuild_cache.dir

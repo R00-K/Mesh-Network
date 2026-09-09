@@ -1,0 +1,98 @@
+Flutter crash report.
+Please report a bug at https://github.com/flutter/flutter/issues.
+
+## command
+
+flutter --quiet assemble --no-version-check --depfile /home/godwin/Desktop/24/android/app/build/intermediates/flutter/debug/flutter_build.d --output /home/godwin/Desktop/24/android/app/build/intermediates/flutter/debug -dTargetFile=lib/main.dart -dTargetPlatform=android -dBuildMode=debug -dTrackWidgetCreation=true -dFlavor= -dAndroidArchs=android-arm android-arm64 android-x64 -dMinSdkVersion=26 debug_android_application
+
+## exception
+
+StateError: Bad state: Could not determine run package name. Project path "/home/godwin/Desktop/24/android/" did not occur as package root in package config "/home/godwin/Desktop/24/.dart_tool/package_config.json". Please report a reproduction on https://github.com/flutter/flutter/issues/169475.
+
+```
+#0      DartBuild.build (package:flutter_tools/src/build_system/targets/native_assets.dart:50:7)
+<asynchronous suspension>
+#1      _BuildInstance._invokeInternal (package:flutter_tools/src/build_system/build_system.dart:937:9)
+<asynchronous suspension>
+#2      Future.wait.<anonymous closure> (dart:async/future.dart:546:21)
+<asynchronous suspension>
+#3      _BuildInstance.invokeTarget (package:flutter_tools/src/build_system/build_system.dart:875:32)
+<asynchronous suspension>
+#4      Future.wait.<anonymous closure> (dart:async/future.dart:546:21)
+<asynchronous suspension>
+#5      _BuildInstance.invokeTarget (package:flutter_tools/src/build_system/build_system.dart:875:32)
+<asynchronous suspension>
+#6      FlutterBuildSystem.build (package:flutter_tools/src/build_system/build_system.dart:684:16)
+<asynchronous suspension>
+#7      AssembleCommand.runCommand (package:flutter_tools/src/commands/assemble.dart:365:32)
+<asynchronous suspension>
+#8      FlutterCommand.run.<anonymous closure> (package:flutter_tools/src/runner/flutter_command.dart:1590:27)
+<asynchronous suspension>
+#9      AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#10     CommandRunner.runCommand (package:args/command_runner.dart:212:13)
+<asynchronous suspension>
+#11     FlutterCommandRunner.runCommand.<anonymous closure> (package:flutter_tools/src/runner/flutter_command_runner.dart:496:9)
+<asynchronous suspension>
+#12     AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#13     FlutterCommandRunner.runCommand (package:flutter_tools/src/runner/flutter_command_runner.dart:431:5)
+<asynchronous suspension>
+#14     FlutterCommandRunner.run.<anonymous closure> (package:flutter_tools/src/runner/flutter_command_runner.dart:307:33)
+<asynchronous suspension>
+#15     run.<anonymous closure>.<anonymous closure> (package:flutter_tools/runner.dart:104:11)
+<asynchronous suspension>
+#16     AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#17     main (package:flutter_tools/executable.dart:103:3)
+<asynchronous suspension>
+```
+
+## flutter doctor
+
+```
+[✓] Flutter (Channel stable, 3.41.4, on Linux Mint 22 6.8.0-88-generic, locale C.UTF-8) [183ms]
+    • Flutter version 3.41.4 on channel stable at /opt/flutter
+    • Upstream repository https://github.com/flutter/flutter.git
+    • Framework revision ff37bef603 (6 months ago), 2026-03-03 16:03:22 -0800
+    • Engine revision e4b8dca3f1
+    • Dart version 3.11.1
+    • DevTools version 2.54.1
+    • Feature flags: enable-web, enable-linux-desktop, enable-macos-desktop, enable-windows-desktop, enable-android, enable-ios, cli-animations, enable-native-assets, omit-legacy-version-file, enable-lldb-debugging, enable-uiscene-migration
+
+[✓] Android toolchain - develop for Android devices (Android SDK version 36.0.0) [8.8s]
+    • Android SDK at /home/godwin/Android/Sdk
+    • Emulator version 35.4.9.0 (build_id 13025442) (CL:N/A)
+    • Platform android-36, build-tools 36.0.0
+    • Java binary at: /opt/android-studio/jbr/bin/java
+      This is the JDK bundled with the latest Android Studio installation on this machine.
+      To manually set the JDK path, use: `flutter config --jdk-dir="path/to/jdk"`.
+    • Java version OpenJDK Runtime Environment (build 21.0.5+-13047016-b750.29)
+    • All Android licenses accepted.
+
+[✗] Chrome - develop for the web (Cannot find Chrome executable at google-chrome) [39ms]
+    ! Cannot find Chrome. Try setting CHROME_EXECUTABLE to a Chrome executable.
+
+[✓] Linux toolchain - develop for Linux desktop [1,160ms]
+    • Ubuntu clang version 18.1.3 (1ubuntu1)
+    • cmake version 3.28.3
+    • ninja version 1.11.1
+    • pkg-config version 1.8.1
+    • OpenGL core renderer: Mesa Intel(R) UHD Graphics (TGL GT2) (X11)
+    • OpenGL core version: 4.6 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2 (X11)
+    • OpenGL core shading language version: 4.60 (X11)
+    • OpenGL ES renderer: Mesa Intel(R) UHD Graphics (TGL GT2) (X11)
+    • OpenGL ES version: OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.24.04.2 (X11)
+    • OpenGL ES shading language version: OpenGL ES GLSL ES 3.20 (X11)
+    • GL_EXT_framebuffer_blit: yes (X11)
+    • GL_EXT_texture_format_BGRA8888: yes (X11)
+
+[✓] Connected device (2 available) [360ms]
+    • STK L22 (mobile) • 93L4C20709000197 • android-arm64 • Android 10 (API 29)
+    • Linux (desktop)  • linux            • linux-x64     • Linux Mint 22 6.8.0-88-generic
+
+[✓] Network resources [1,083ms]
+    • All expected network resources are available.
+
+! Doctor found issues in 1 category.
+```

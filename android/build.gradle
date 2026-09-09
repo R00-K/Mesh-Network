@@ -1,0 +1,20 @@
+plugins {
+    id "com.android.application" apply false
+    id "org.jetbrains.kotlin.android" apply false
+}
+
+// Keep Flutter's generated artifacts in the repository-level build directory.
+// Flutter tooling looks here when installing an APK via `flutter run`.
+rootProject.buildDir = "../build"
+
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

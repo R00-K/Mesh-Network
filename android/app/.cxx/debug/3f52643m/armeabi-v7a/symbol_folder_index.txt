@@ -1,0 +1,1 @@
+/home/godwin/Desktop/24/android/app/build/intermediates/cxx/debug/3f52643m/obj/armeabi-v7a
