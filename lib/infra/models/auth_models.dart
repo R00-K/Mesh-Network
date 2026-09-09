@@ -3,7 +3,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'auth_models.freezed.dart';
 part 'auth_models.g.dart';
 
-/// Authenticated user session returned by the authentication API.
+/// Authenticated user session returned by the authentication service.
 @freezed
 class AuthSession with _$AuthSession {
   const factory AuthSession({
@@ -12,6 +12,5 @@ class AuthSession with _$AuthSession {
     required String accessToken,
   }) = _AuthSession;
 
-  factory AuthSession.fromJson(Map<String, dynamic> json) =>
-      _$AuthSessionFromJson(json);
+  factory AuthSession.fromJson(Map<String, dynamic> json) => _$AuthSessionFromJson(json);
 }

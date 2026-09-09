@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "993772293389",
+    "project_id": "meshnetwork-8a1c7",
+    "storage_bucket": "meshnetwork-8a1c7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993772293389:android:ba6970592033e15b137444",
+        "android_client_info": {
+          "package_name": "org.disastermesh.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDEx3-E6Q6yXLXOwvNjjSITIyljVXeJC54"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

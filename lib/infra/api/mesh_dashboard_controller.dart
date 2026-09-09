@@ -1,0 +1,130 @@
+import 'dart:async';
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../services/repositories/mesh_repository.dart';
+import 'mesh_dashboard_models.dart';
+
+final meshDashboardProvider = NotifierProvider.autoDispose<
+    MeshDashboardController, MeshDashboardState>(MeshDashboardController.new);
+
+/// Coordinates simulated dashboard data and the native mesh channel.
+class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
+  Timer? _timer;
+  final _random = Random(7);
+
+  @override
+  MeshDashboardState build() {
+    ref.onDispose(() => _timer?.cancel());
+    final nodes = _simulatedNodes();
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _tick());
+    return MeshDashboardState(nodes: nodes);
+  }
+
+  Future<void> startMesh() async {
+    state = state.copyWith(isActive: true, isDiscovering: true);
+    try {
+      await ref.read(meshChannelProvider).startMesh();
+      await ref.read(meshChannelProvider).discoverPeers();
+    } catch (_) {
+      // The simulation remains available on unsupported platforms and tests.
+    }
+    state = state.copyWith(isDiscovering: false);
+  }
+
+  void toggleSimulation(bool enabled) {
+    state = state.copyWith(
+      simulationEnabled: enabled,
+      nodes: enabled ? _simulatedNodes() : const [],
+    );
+  }
+
+  void recalculateRoute() {
+    state = state.copyWith(
+      routeCost: 1.1 + _random.nextDouble() * .8,
+      routeLatency: 24 + _random.nextInt(30),
+      events: [
+        const MeshEvent(
+          title: 'Route recalculated',
+          detail: 'Lowest-cost path selected',
+          time: 'now',
+          icon: Icons.alt_route,
+          color: Color(0xff42a5f5),
+        ),
+        ...state.events,
+      ].take(8).toList(),
+    );
+  }
+
+  void _tick() {
+    if (!state.simulationEnabled) return;
+    final nodes = state.nodes
+        .map((node) => MeshNode(
+              id: node.id,
+              name: node.name,
+              battery: max(12, node.battery - _random.nextInt(3)),
+              signal: max(42, node.signal - _random.nextInt(4)),
+              latency: max(18, node.latency + _random.nextInt(7) - 3),
+              position: node.position,
+              role: node.role,
+            ))
+        .toList();
+    state = state.copyWith(nodes: nodes);
+  }
+
+  List<MeshNode> _simulatedNodes() => const [
+        MeshNode(
+          id: 'local',
+          name: 'You',
+          battery: 86,
+          signal: 100,
+          latency: 0,
+          position: Offset(.5, .5),
+          role: MeshNodeRole.local,
+        ),
+        MeshNode(
+          id: 'alpha',
+          name: 'Alpha',
+          battery: 79,
+          signal: 91,
+          latency: 18,
+          position: Offset(.5, .16),
+          role: MeshNodeRole.relay,
+        ),
+        MeshNode(
+          id: 'bravo',
+          name: 'Bravo',
+          battery: 68,
+          signal: 82,
+          latency: 23,
+          position: Offset(.82, .34),
+        ),
+        MeshNode(
+          id: 'charlie',
+          name: 'Charlie',
+          battery: 93,
+          signal: 74,
+          latency: 31,
+          position: Offset(.78, .78),
+          role: MeshNodeRole.destination,
+        ),
+        MeshNode(
+          id: 'delta',
+          name: 'Delta',
+          battery: 54,
+          signal: 69,
+          latency: 44,
+          position: Offset(.22, .78),
+        ),
+        MeshNode(
+          id: 'echo',
+          name: 'Echo',
+          battery: 61,
+          signal: 77,
+          latency: 28,
+          position: Offset(.18, .34),
+        ),
+      ];
+}
