@@ -26,6 +26,9 @@ class MeshTransport(
     private var serverSocket: ServerSocket? = null
     private val links = CopyOnWriteArrayList<Link>()
 
+    val connectedLinkCount: Int
+        get() = links.size
+
     @Synchronized
     fun start(isGroupOwner: Boolean, groupOwnerAddress: String?) {
         stop()

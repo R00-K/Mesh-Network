@@ -64,6 +64,10 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
         isActive: payload['running'] as bool? ?? state.isActive,
         isDiscovering: payload['discovering'] as bool? ?? state.isDiscovering,
       );
+    } else if (event['type'] == 'MetricsChanged') {
+      state = state.copyWith(
+        nativeMetrics: Map<String, dynamic>.from(payload),
+      );
     } else if (event['type'] == 'PeerUpdate') {
       final peers = (payload['peers'] as List? ?? const [])
           .whereType<Map>()

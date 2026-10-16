@@ -12,12 +12,14 @@ import org.disastermesh.app.mesh.service.MeshForegroundService
 import org.disastermesh.app.mesh.transport.MeshTransport
 import org.disastermesh.app.mesh.storage.MessageStore
 import org.disastermesh.app.mesh.routing.RouteCoordinator
+import org.disastermesh.app.mesh.metrics.MetricsCollector
 import android.os.Handler
 import android.os.Looper
 import org.disastermesh.core.logging.MeshLogger
 import org.json.JSONObject
 import org.json.JSONArray
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import android.provider.Settings
 
 /** Initial Flutter bridge for the native mesh service boundary. */
@@ -27,6 +29,9 @@ class MeshChannelHandler(
     private val requestPermissions: () -> Unit,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     private val messageStore = MessageStore(context.applicationContext)
+    private val metrics = MetricsCollector(context.applicationContext)
+    private val sentAt = ConcurrentHashMap<String, Long>()
+    private val metricsHandler = Handler(Looper.getMainLooper())
     private val recoveryHandler = Handler(Looper.getMainLooper())
     private val routeCoordinator = RouteCoordinator(logger) { route ->
         emit(
@@ -50,6 +55,7 @@ class MeshChannelHandler(
             routeCoordinator.transportChanged(state, connection.connectedPeerId)
             if (state == "connected") retryPendingMessages()
             if (state == "disconnected" || state == "failed") scheduleLinkRecovery()
+            emitMetrics()
         },
         onEnvelopeReceived = ::handleEnvelope,
     )
@@ -95,6 +101,7 @@ class MeshChannelHandler(
                 pendingStart = false
                 transport.stop()
                 recoveryHandler.removeCallbacksAndMessages(null)
+                metricsHandler.removeCallbacksAndMessages(null)
                 routeCoordinator.noRoute("mesh_stopped")
                 discovery.stop()
                 context.stopService(Intent(context, MeshForegroundService::class.java))
@@ -180,7 +187,7 @@ class MeshChannelHandler(
                 emit("PeerUpdate", mapOf("peers" to peers))
                 result.success(peers)
             }
-            "getMetrics" -> result.success(emptyMap<String, Any?>())
+            "getMetrics" -> result.success(metrics.snapshot(transport.connectedLinkCount))
             else -> result.notImplemented()
         }
     }
@@ -208,6 +215,8 @@ class MeshChannelHandler(
         }
         running = true
         discovery.start()
+        metricsHandler.removeCallbacksAndMessages(null)
+        metricsHandler.post(metricsRunnable)
         val serviceIntent = Intent(context, MeshForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(serviceIntent)
@@ -245,7 +254,11 @@ class MeshChannelHandler(
                 val id = envelope.optString("id")
                 if (envelope.optString("destination") == localNodeId) {
                     messageStore.markDelivered(id)
+                    metrics.recordAcknowledgement(
+                        sentAt.remove(id)?.let { System.currentTimeMillis() - it },
+                    )
                     emit("MessageStatusChanged", mapOf("id" to id, "status" to "delivered"))
+                    emitMetrics()
                 }
             }
             "message" -> handleIncomingMessage(envelope)
@@ -309,7 +322,11 @@ class MeshChannelHandler(
 
     private fun sendStoredMessage(message: JSONObject): Boolean {
         messageStore.markAttempted(message.optString("id"))
-        return transport.send(message)
+        val id = message.optString("id")
+        sentAt[id] = System.currentTimeMillis()
+        val sent = transport.send(message)
+        metrics.recordSend(sent)
+        return sent
     }
 
     private fun retryPendingMessages() {
@@ -342,7 +359,19 @@ class MeshChannelHandler(
         )
     }
 
+    private val metricsRunnable = object : Runnable {
+        override fun run() {
+            emitMetrics()
+            if (running) metricsHandler.postDelayed(this, METRICS_INTERVAL_MS)
+        }
+    }
+
+    private fun emitMetrics() {
+        emit("MetricsChanged", metrics.snapshot(transport.connectedLinkCount))
+    }
+
     private companion object {
         const val RECOVERY_DELAY_MS = 2_000L
+        const val METRICS_INTERVAL_MS = 5_000L
     }
 }

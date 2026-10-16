@@ -87,6 +87,12 @@ class DashboardScreen extends ConsumerWidget {
                 'Demo topology is ${state.simulationEnabled ? 'shown' : 'hidden'}',
                 style: theme.textTheme.bodySmall,
               ),
+              if (state.nativeMetrics.isNotEmpty)
+                Text(
+                  'Measured battery: ${state.nativeMetrics['batteryPercent'] ?? 'unavailable'}% • '
+                  'Measured route score: ${(state.nativeMetrics['routeScore'] as num?)?.toStringAsFixed(2) ?? 'unavailable'}',
+                  style: theme.textTheme.bodySmall,
+                ),
               const SizedBox(height: 16),
               LayoutBuilder(
                 builder: (context, constraints) {
