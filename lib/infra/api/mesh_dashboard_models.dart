@@ -55,6 +55,7 @@ class MeshDashboardState {
     this.nativePeers = const [],
     this.messageLog = const [],
     this.nativeMetrics = const {},
+    this.routingEvaluation = const {},
     this.events = const [],
     this.pendingMessages = 0,
     this.activeRoutes = 0,
@@ -72,6 +73,7 @@ class MeshDashboardState {
   final List<Peer> nativePeers;
   final List<String> messageLog;
   final Map<String, dynamic> nativeMetrics;
+  final Map<String, dynamic> routingEvaluation;
   final List<MeshEvent> events;
   final int pendingMessages;
   final int activeRoutes;
@@ -99,6 +101,7 @@ class MeshDashboardState {
     List<Peer>? nativePeers,
     List<String>? messageLog,
     Map<String, dynamic>? nativeMetrics,
+    Map<String, dynamic>? routingEvaluation,
     List<MeshEvent>? events,
     int? pendingMessages,
     int? activeRoutes,
@@ -116,6 +119,7 @@ class MeshDashboardState {
       nativePeers: nativePeers ?? this.nativePeers,
       messageLog: messageLog ?? this.messageLog,
       nativeMetrics: nativeMetrics ?? this.nativeMetrics,
+      routingEvaluation: routingEvaluation ?? this.routingEvaluation,
       events: events ?? this.events,
       pendingMessages: pendingMessages ?? this.pendingMessages,
       activeRoutes: activeRoutes ?? this.activeRoutes,

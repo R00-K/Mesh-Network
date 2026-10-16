@@ -68,6 +68,10 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
       state = state.copyWith(
         nativeMetrics: Map<String, dynamic>.from(payload),
       );
+    } else if (event['type'] == 'RoutingEvaluationChanged') {
+      state = state.copyWith(
+        routingEvaluation: Map<String, dynamic>.from(payload),
+      );
     } else if (event['type'] == 'PeerUpdate') {
       final peers = (payload['peers'] as List? ?? const [])
           .whereType<Map>()

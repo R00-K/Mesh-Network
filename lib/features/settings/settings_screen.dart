@@ -32,6 +32,16 @@ class SettingsScreen extends ConsumerWidget {
             onChanged: controller.toggleSimulation,
           ),
         ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.auto_graph),
+            title: const Text('Routing strategy'),
+            subtitle: Text(
+              '${state.routingEvaluation['strategy'] ?? 'deterministic_with_fallback'}'
+              ' • Model enabled: ${state.routingEvaluation['modelEnabled'] ?? false}',
+            ),
+          ),
+        ),
         const Card(child: SwitchListTile(value: true, onChanged: null, title: Text('Developer logs'), subtitle: Text('Native discovery and routing events'))),
       ],
     );

@@ -12,6 +12,7 @@ import org.disastermesh.app.mesh.service.MeshForegroundService
 import org.disastermesh.app.mesh.transport.MeshTransport
 import org.disastermesh.app.mesh.storage.MessageStore
 import org.disastermesh.app.mesh.routing.RouteCoordinator
+import org.disastermesh.app.mesh.routing.AdaptiveRouteEvaluator
 import org.disastermesh.app.mesh.metrics.MetricsCollector
 import android.os.Handler
 import android.os.Looper
@@ -44,6 +45,7 @@ class MeshChannelHandler(
             ),
         )
     }
+    private val routeEvaluator = AdaptiveRouteEvaluator(context.applicationContext)
     private val localNodeId = Settings.Secure.getString(
         context.contentResolver,
         Settings.Secure.ANDROID_ID,
@@ -144,6 +146,7 @@ class MeshChannelHandler(
                     "reason" to routeCoordinator.snapshot.reason,
                 ),
             )
+            "getRoutingEvaluation" -> result.success(routeEvaluator.evaluation())
             "sendMessage" -> {
                 val destination = call.argument<String>("destination")
                 val payload = call.argument<String>("payload")
@@ -196,6 +199,7 @@ class MeshChannelHandler(
         eventSink = events
         emit("MeshStatusChanged", mapOf("running" to running, "discovering" to discovery.isDiscovering))
         emitPeers()
+        emit("RoutingEvaluationChanged", routeEvaluator.evaluation())
     }
 
     override fun onCancel(arguments: Any?) {
@@ -254,11 +258,17 @@ class MeshChannelHandler(
                 val id = envelope.optString("id")
                 if (envelope.optString("destination") == localNodeId) {
                     messageStore.markDelivered(id)
-                    metrics.recordAcknowledgement(
-                        sentAt.remove(id)?.let { System.currentTimeMillis() - it },
+                    val latency = sentAt.remove(id)?.let { System.currentTimeMillis() - it }
+                    metrics.recordAcknowledgement(latency)
+                    routeEvaluator.recordOutcome(
+                        routeId = connection.connectedPeerId ?: "unknown",
+                        delivered = true,
+                        latencyMs = latency,
+                        routeScore = metrics.snapshot(transport.connectedLinkCount)["routeScore"] as? Double,
                     )
                     emit("MessageStatusChanged", mapOf("id" to id, "status" to "delivered"))
                     emitMetrics()
+                    emit("RoutingEvaluationChanged", routeEvaluator.evaluation())
                 }
             }
             "message" -> handleIncomingMessage(envelope)
@@ -326,6 +336,15 @@ class MeshChannelHandler(
         sentAt[id] = System.currentTimeMillis()
         val sent = transport.send(message)
         metrics.recordSend(sent)
+        if (!sent) {
+            routeEvaluator.recordOutcome(
+                routeId = connection.connectedPeerId ?: "unknown",
+                delivered = false,
+                latencyMs = null,
+                routeScore = metrics.snapshot(transport.connectedLinkCount)["routeScore"] as? Double,
+            )
+            emit("RoutingEvaluationChanged", routeEvaluator.evaluation())
+        }
         return sent
     }
 
