@@ -12,6 +12,7 @@ import org.disastermesh.app.mesh.channels.MeshChannelHandler
 
 class MainActivity : FlutterActivity() {
     private val channelName = "disaster_mesh/mesh"
+    private var meshHandler: MeshChannelHandler? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -29,11 +30,30 @@ class MainActivity : FlutterActivity() {
                     add(Manifest.permission.NEARBY_WIFI_DEVICES)
                 }
             }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-            if (permissions.isNotEmpty()) requestPermissions(permissions.toTypedArray(), 2402)
+            if (permissions.isNotEmpty()) {
+                requestPermissions(permissions.toTypedArray(), 2402)
+            } else {
+                meshHandler?.onPermissionsResult(granted = true)
+            }
         }
+        meshHandler = handler
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler(handler)
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "disaster_mesh/events")
             .setStreamHandler(handler)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 2402) {
+            meshHandler?.onPermissionsResult(
+                granted = grantResults.isNotEmpty() &&
+                    grantResults.all { it == PackageManager.PERMISSION_GRANTED },
+            )
+        }
     }
 }

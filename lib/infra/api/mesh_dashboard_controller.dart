@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/repositories/mesh_repository.dart';
+import '../../shared/models/mesh_models.dart';
 import 'mesh_dashboard_models.dart';
 
 final meshDashboardProvider = NotifierProvider.autoDispose<
@@ -13,13 +14,20 @@ final meshDashboardProvider = NotifierProvider.autoDispose<
 /// Coordinates simulated dashboard data and the native mesh channel.
 class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
   Timer? _timer;
+  StreamSubscription<Map<String, dynamic>>? _eventsSubscription;
   final _random = Random(7);
 
   @override
   MeshDashboardState build() {
-    ref.onDispose(() => _timer?.cancel());
+    ref.onDispose(() {
+      _timer?.cancel();
+      _eventsSubscription?.cancel();
+    });
     final nodes = _simulatedNodes();
     _timer = Timer.periodic(const Duration(seconds: 5), (_) => _tick());
+    final channel = ref.read(meshChannelProvider);
+    _eventsSubscription = channel.events.listen(_handleNativeEvent);
+    _loadNativePeers();
     return MeshDashboardState(nodes: nodes);
   }
 
@@ -27,11 +35,34 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
     state = state.copyWith(isActive: true, isDiscovering: true);
     try {
       await ref.read(meshChannelProvider).startMesh();
-      await ref.read(meshChannelProvider).discoverPeers();
     } catch (_) {
       // The simulation remains available on unsupported platforms and tests.
     }
-    state = state.copyWith(isDiscovering: false);
+  }
+
+  Future<void> _loadNativePeers() async {
+    try {
+      final peers = await ref.read(meshChannelProvider).getPeers();
+      state = state.copyWith(nativePeers: peers);
+    } catch (_) {
+      // Native mesh is unavailable on non-Android platforms.
+    }
+  }
+
+  void _handleNativeEvent(Map<String, dynamic> event) {
+    final payload = Map<String, dynamic>.from(event['payload'] as Map? ?? {});
+    if (event['type'] == 'MeshStatusChanged') {
+      state = state.copyWith(
+        isActive: payload['running'] as bool? ?? state.isActive,
+        isDiscovering: payload['discovering'] as bool? ?? state.isDiscovering,
+      );
+    } else if (event['type'] == 'PeerUpdate') {
+      final peers = (payload['peers'] as List? ?? const [])
+          .whereType<Map>()
+          .map((peer) => Peer.fromJson(Map<String, dynamic>.from(peer)))
+          .toList(growable: false);
+      state = state.copyWith(nativePeers: peers);
+    }
   }
 
   void toggleSimulation(bool enabled) {

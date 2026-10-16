@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/models/mesh_models.dart';
+
 /// Role a node currently plays in the mesh.
 enum MeshNodeRole { local, relay, destination, peer }
 
@@ -13,7 +15,7 @@ class MeshNode {
     required this.latency,
     required this.position,
     this.role = MeshNodeRole.peer,
-    this.connected = true,
+    this.connected = false,
   });
 
   final String id;
@@ -50,6 +52,7 @@ class MeshDashboardState {
     this.isDiscovering = false,
     this.simulationEnabled = true,
     this.nodes = const [],
+    this.nativePeers = const [],
     this.events = const [],
     this.pendingMessages = 0,
     this.activeRoutes = 1,
@@ -61,11 +64,16 @@ class MeshDashboardState {
   final bool isDiscovering;
   final bool simulationEnabled;
   final List<MeshNode> nodes;
+  final List<Peer> nativePeers;
   final List<MeshEvent> events;
   final int pendingMessages;
   final int activeRoutes;
   final double routeCost;
   final int routeLatency;
+
+  int get connectedPeerCount => nativePeers
+      .where((peer) => peer.status == PeerStatus.connected)
+      .length;
 
   int get averageBattery {
     if (nodes.isEmpty) return 0;
@@ -78,6 +86,7 @@ class MeshDashboardState {
     bool? isDiscovering,
     bool? simulationEnabled,
     List<MeshNode>? nodes,
+    List<Peer>? nativePeers,
     List<MeshEvent>? events,
     int? pendingMessages,
     int? activeRoutes,
@@ -89,6 +98,7 @@ class MeshDashboardState {
       isDiscovering: isDiscovering ?? this.isDiscovering,
       simulationEnabled: simulationEnabled ?? this.simulationEnabled,
       nodes: nodes ?? this.nodes,
+      nativePeers: nativePeers ?? this.nativePeers,
       events: events ?? this.events,
       pendingMessages: pendingMessages ?? this.pendingMessages,
       activeRoutes: activeRoutes ?? this.activeRoutes,

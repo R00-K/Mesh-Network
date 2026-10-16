@@ -57,7 +57,7 @@ class DashboardScreen extends ConsumerWidget {
                 children: [
                   MeshMetricCard(
                     label: 'Connected Nodes',
-                    value: '${state.nodes.length}',
+                    value: '${state.connectedPeerCount}',
                     icon: Icons.hub_outlined,
                     color: const Color(0xff42a5f5),
                   ),
@@ -80,6 +80,12 @@ class DashboardScreen extends ConsumerWidget {
                     color: const Color(0xff64ff8c),
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Discovery is ${state.isDiscovering ? 'active' : 'inactive'} • '
+                'Demo topology is ${state.simulationEnabled ? 'shown' : 'hidden'}',
+                style: theme.textTheme.bodySmall,
               ),
               const SizedBox(height: 16),
               LayoutBuilder(

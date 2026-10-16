@@ -17,12 +17,16 @@ import org.disastermesh.core.logging.MeshLogger
 class MeshDiscoveryManager(
     private val context: Context,
     private val logger: MeshLogger,
+    private val onDiscoveryStateChanged: (Boolean) -> Unit = {},
+    private val onPeersChanged: () -> Unit = {},
 ) {
     private val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
     private val channel = manager.initialize(context, Looper.getMainLooper(), null)
     private val _peers = MutableStateFlow<List<WifiP2pDevice>>(emptyList())
     private val receiver = MeshBroadcastReceiver(this, logger)
     private var registered = false
+    var isDiscovering: Boolean = false
+        private set
 
     /** Currently discovered Wi-Fi Direct devices. */
     val peers: StateFlow<List<WifiP2pDevice>> = _peers
@@ -43,6 +47,8 @@ class MeshDiscoveryManager(
             registered = false
         }
         manager.stopPeerDiscovery(channel, null)
+        isDiscovering = false
+        onDiscoveryStateChanged(false)
         _peers.value = emptyList()
     }
 
@@ -53,12 +59,17 @@ class MeshDiscoveryManager(
             return
         }
         manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = logger.info("discovery_started")
+            override fun onSuccess() {
+                isDiscovering = true
+                onDiscoveryStateChanged(true)
+                logger.info("discovery_started")
+            }
 
-            override fun onFailure(reason: Int) = logger.warn(
-                "discovery_failed",
-                mapOf("reason" to reason),
-            )
+            override fun onFailure(reason: Int) {
+                isDiscovering = false
+                onDiscoveryStateChanged(false)
+                logger.warn("discovery_failed", mapOf("reason" to reason))
+            }
         })
     }
 
@@ -69,6 +80,7 @@ class MeshDiscoveryManager(
 
     internal fun updatePeers(devices: Collection<WifiP2pDevice>) {
         _peers.value = devices.sortedBy { it.deviceName.lowercase() }
+        onPeersChanged()
         logger.debug("peers_updated", mapOf("count" to devices.size))
     }
 
