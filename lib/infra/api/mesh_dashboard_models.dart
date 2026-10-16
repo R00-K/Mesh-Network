@@ -53,6 +53,7 @@ class MeshDashboardState {
     this.simulationEnabled = true,
     this.nodes = const [],
     this.nativePeers = const [],
+    this.messageLog = const [],
     this.events = const [],
     this.pendingMessages = 0,
     this.activeRoutes = 1,
@@ -65,6 +66,7 @@ class MeshDashboardState {
   final bool simulationEnabled;
   final List<MeshNode> nodes;
   final List<Peer> nativePeers;
+  final List<String> messageLog;
   final List<MeshEvent> events;
   final int pendingMessages;
   final int activeRoutes;
@@ -87,6 +89,7 @@ class MeshDashboardState {
     bool? simulationEnabled,
     List<MeshNode>? nodes,
     List<Peer>? nativePeers,
+    List<String>? messageLog,
     List<MeshEvent>? events,
     int? pendingMessages,
     int? activeRoutes,
@@ -99,6 +102,7 @@ class MeshDashboardState {
       simulationEnabled: simulationEnabled ?? this.simulationEnabled,
       nodes: nodes ?? this.nodes,
       nativePeers: nativePeers ?? this.nativePeers,
+      messageLog: messageLog ?? this.messageLog,
       events: events ?? this.events,
       pendingMessages: pendingMessages ?? this.pendingMessages,
       activeRoutes: activeRoutes ?? this.activeRoutes,

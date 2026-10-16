@@ -35,6 +35,17 @@ class MeshChannel {
   /// Removes the current Wi-Fi Direct group connection.
   Future<void> disconnectPeer() async => invoke<void>('disconnectPeer');
 
+  /// Sends a single-hop text message over the active Wi-Fi Direct link.
+  Future<String?> sendMessage({
+    required String destination,
+    required String payload,
+  }) {
+    return invoke<String>('sendMessage', <String, dynamic>{
+      'destination': destination,
+      'payload': payload,
+    });
+  }
+
   /// Reads the current peer list from Android.
   Future<List<Peer>> getPeers() async {
     final value = await invoke<List<dynamic>>('getPeers') ?? const [];

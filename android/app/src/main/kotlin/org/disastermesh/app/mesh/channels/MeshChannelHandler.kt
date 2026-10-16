@@ -9,7 +9,11 @@ import io.flutter.plugin.common.MethodChannel
 import org.disastermesh.app.mesh.discovery.MeshDiscoveryManager
 import org.disastermesh.app.mesh.connection.WifiDirectConnectionManager
 import org.disastermesh.app.mesh.service.MeshForegroundService
+import org.disastermesh.app.mesh.transport.MeshTransport
 import org.disastermesh.core.logging.MeshLogger
+import org.json.JSONObject
+import java.util.UUID
+import android.provider.Settings
 
 /** Initial Flutter bridge for the native mesh service boundary. */
 class MeshChannelHandler(
@@ -17,10 +21,37 @@ class MeshChannelHandler(
     private val logger: MeshLogger,
     private val requestPermissions: () -> Unit,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+    private val localNodeId = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ANDROID_ID,
+    ) ?: "android-node"
+    private val transport = MeshTransport(
+        logger = logger,
+        onStateChanged = { state ->
+            emit("TransportChanged", mapOf("state" to state))
+        },
+        onEnvelopeReceived = { envelope ->
+            emit(
+                "MessageReceived",
+                mapOf(
+                    "id" to envelope.optString("id"),
+                    "source" to envelope.optString("source"),
+                    "destination" to envelope.optString("destination"),
+                    "payload" to envelope.optString("payload"),
+                    "createdAt" to envelope.optLong("createdAt"),
+                ),
+            )
+        },
+    )
     private val connection = WifiDirectConnectionManager(
         context = context.applicationContext,
         logger = logger,
         onStateChanged = { state, peerId ->
+            if (state == "connected") {
+                transport.start(connection.isGroupOwner, connection.groupOwnerAddress)
+            } else if (state == "disconnected" || state == "failed") {
+                transport.stop()
+            }
             emit("ConnectionChanged", mapOf("state" to state, "peerId" to peerId))
             emitPeers()
         },
@@ -49,6 +80,7 @@ class MeshChannelHandler(
             "stopMesh" -> {
                 running = false
                 pendingStart = false
+                transport.stop()
                 discovery.stop()
                 context.stopService(Intent(context, MeshForegroundService::class.java))
                 logger.info("mesh_stopped")
@@ -82,7 +114,28 @@ class MeshChannelHandler(
                     "isGroupOwner" to connection.isGroupOwner,
                 ),
             )
-            "sendMessage" -> result.success(null)
+            "sendMessage" -> {
+                val destination = call.argument<String>("destination")
+                val payload = call.argument<String>("payload")
+                if (destination.isNullOrBlank() || payload == null) {
+                    result.error("INVALID_ARGUMENT", "destination and payload are required", null)
+                } else {
+                    val id = UUID.randomUUID().toString()
+                    val envelope = JSONObject()
+                        .put("type", "message")
+                        .put("id", id)
+                        .put("source", localNodeId)
+                        .put("destination", destination)
+                        .put("payload", payload)
+                        .put("createdAt", System.currentTimeMillis())
+                    val sent = transport.send(envelope)
+                    emit(
+                        "MessageStatusChanged",
+                        mapOf("id" to id, "status" to if (sent) "sent" else "failed"),
+                    )
+                    result.success(id)
+                }
+            }
             "getPeers" -> {
                 val peers = discovery.peers.value.map { peer ->
                     mapOf<String, Any?>(

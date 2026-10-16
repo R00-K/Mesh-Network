@@ -70,6 +70,22 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
           .map((peer) => Peer.fromJson(Map<String, dynamic>.from(peer)))
           .toList(growable: false);
       state = state.copyWith(nativePeers: peers);
+    } else if (event['type'] == 'MessageReceived') {
+      final source = payload['source'] ?? 'unknown';
+      final message = payload['payload'] ?? '';
+      state = state.copyWith(
+        messageLog: ['Received from $source: $message', ...state.messageLog]
+            .take(50)
+            .toList(growable: false),
+      );
+    } else if (event['type'] == 'MessageStatusChanged') {
+      final id = payload['id'] ?? 'unknown';
+      final status = payload['status'] ?? 'unknown';
+      state = state.copyWith(
+        messageLog: ['Message $id: $status', ...state.messageLog]
+            .take(50)
+            .toList(growable: false),
+      );
     }
   }
 
