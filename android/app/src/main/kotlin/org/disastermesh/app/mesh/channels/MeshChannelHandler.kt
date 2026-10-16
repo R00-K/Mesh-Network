@@ -10,6 +10,7 @@ import org.disastermesh.app.mesh.discovery.MeshDiscoveryManager
 import org.disastermesh.app.mesh.connection.WifiDirectConnectionManager
 import org.disastermesh.app.mesh.service.MeshForegroundService
 import org.disastermesh.app.mesh.transport.MeshTransport
+import org.disastermesh.app.mesh.storage.MessageStore
 import org.disastermesh.core.logging.MeshLogger
 import org.json.JSONObject
 import java.util.UUID
@@ -21,6 +22,7 @@ class MeshChannelHandler(
     private val logger: MeshLogger,
     private val requestPermissions: () -> Unit,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+    private val messageStore = MessageStore(context.applicationContext)
     private val localNodeId = Settings.Secure.getString(
         context.contentResolver,
         Settings.Secure.ANDROID_ID,
@@ -29,21 +31,12 @@ class MeshChannelHandler(
         logger = logger,
         onStateChanged = { state ->
             emit("TransportChanged", mapOf("state" to state))
+            if (state == "connected") retryPendingMessages()
         },
-        onEnvelopeReceived = { envelope ->
-            emit(
-                "MessageReceived",
-                mapOf(
-                    "id" to envelope.optString("id"),
-                    "source" to envelope.optString("source"),
-                    "destination" to envelope.optString("destination"),
-                    "payload" to envelope.optString("payload"),
-                    "createdAt" to envelope.optLong("createdAt"),
-                ),
-            )
-        },
+        onEnvelopeReceived = ::handleEnvelope,
     )
-    private val connection = WifiDirectConnectionManager(
+    private val connection: WifiDirectConnectionManager by lazy {
+        WifiDirectConnectionManager(
         context = context.applicationContext,
         logger = logger,
         onStateChanged = { state, peerId ->
@@ -55,7 +48,8 @@ class MeshChannelHandler(
             emit("ConnectionChanged", mapOf("state" to state, "peerId" to peerId))
             emitPeers()
         },
-    )
+        )
+    }
     private val discovery = MeshDiscoveryManager(
         context = context.applicationContext,
         logger = logger,
@@ -128,10 +122,12 @@ class MeshChannelHandler(
                         .put("destination", destination)
                         .put("payload", payload)
                         .put("createdAt", System.currentTimeMillis())
-                    val sent = transport.send(envelope)
+                        .put("hopLimit", 1)
+                    messageStore.enqueue(envelope)
+                    val sent = sendStoredMessage(envelope)
                     emit(
                         "MessageStatusChanged",
-                        mapOf("id" to id, "status" to if (sent) "sent" else "failed"),
+                        mapOf("id" to id, "status" to if (sent) "sent" else "queued"),
                     )
                     result.success(id)
                 }
@@ -213,4 +209,67 @@ class MeshChannelHandler(
 
     private fun peerStatus(peerId: String): String =
         if (connection.isConnected && connection.connectedPeerId == peerId) "connected" else "nearby"
+
+    private fun handleEnvelope(envelope: JSONObject) {
+        when (envelope.optString("type")) {
+            "ack" -> {
+                val id = envelope.optString("id")
+                messageStore.markDelivered(id)
+                emit("MessageStatusChanged", mapOf("id" to id, "status" to "delivered"))
+            }
+            "message" -> handleIncomingMessage(envelope)
+        }
+    }
+
+    private fun handleIncomingMessage(envelope: JSONObject) {
+        val id = envelope.optString("id")
+        if (envelope.optString("destination") != localNodeId) return
+
+        val firstDelivery = messageStore.markSeen(id)
+        sendAcknowledgement(envelope)
+        if (!firstDelivery) {
+            emit("MessageStatusChanged", mapOf("id" to id, "status" to "duplicate_ignored"))
+            return
+        }
+
+        emit(
+            "MessageReceived",
+            mapOf(
+                "id" to id,
+                "source" to envelope.optString("source"),
+                "destination" to envelope.optString("destination"),
+                "payload" to envelope.optString("payload"),
+                "createdAt" to envelope.optLong("createdAt"),
+            ),
+        )
+    }
+
+    private fun sendAcknowledgement(message: JSONObject) {
+        transport.send(
+            JSONObject()
+                .put("type", "ack")
+                .put("id", message.optString("id"))
+                .put("source", localNodeId)
+                .put("destination", message.optString("source"))
+                .put("createdAt", System.currentTimeMillis()),
+        )
+    }
+
+    private fun sendStoredMessage(message: JSONObject): Boolean {
+        messageStore.markAttempted(message.optString("id"))
+        return transport.send(message)
+    }
+
+    private fun retryPendingMessages() {
+        messageStore.pendingMessages().forEach { message ->
+            val sent = sendStoredMessage(message)
+            emit(
+                "MessageStatusChanged",
+                mapOf(
+                    "id" to message.optString("id"),
+                    "status" to if (sent) "sent_retry" else "queued",
+                ),
+            )
+        }
+    }
 }
