@@ -15,6 +15,7 @@ class DashboardScreen extends ConsumerWidget {
     final state = ref.watch(meshDashboardProvider);
     final controller = ref.read(meshDashboardProvider.notifier);
     final theme = Theme.of(context);
+    final measuredBattery = state.nativeMetrics['batteryPercent'];
     return CustomScrollView(
       slivers: [
         SliverAppBar(
@@ -75,8 +76,10 @@ class DashboardScreen extends ConsumerWidget {
                     color: Colors.orange,
                   ),
                   MeshMetricCard(
-                    label: 'Network Battery',
-                    value: '${state.averageBattery}%',
+                    label: 'Device Battery',
+                    value: measuredBattery == null
+                        ? '—'
+                        : measuredBattery.toString() + '%',
                     icon: Icons.battery_5_bar,
                     color: const Color(0xff64ff8c),
                   ),
@@ -85,7 +88,7 @@ class DashboardScreen extends ConsumerWidget {
               const SizedBox(height: 8),
               Text(
                 'Discovery is ${state.isDiscovering ? 'active' : 'inactive'} • '
-                'Demo topology is ${state.simulationEnabled ? 'shown' : 'hidden'}',
+                'Real topology only',
                 style: theme.textTheme.bodySmall,
               ),
               if (state.nativeMetrics.isNotEmpty)
@@ -102,18 +105,21 @@ class DashboardScreen extends ConsumerWidget {
                     icon: Icons.account_tree_outlined,
                     child: SizedBox(
                       height: 320,
-                      child: MeshTopology(
-                        nodes: state.topologyNodes,
-                        onNodeTap: (node) {
-                          if (node.id == 'local' ||
-                              !state.nativePeers.any((peer) => peer.id == node.id)) {
-                            return;
-                          }
-                          context.go(
-                            '/messages?destination=${Uri.encodeComponent(node.id)}',
-                          );
-                        },
-                      ),
+                      child: state.topologyNodes.length <= 1
+                          ? const Center(child: Text('No real connections available'))
+                          : MeshTopology(
+                              nodes: state.topologyNodes,
+                              onNodeTap: (node) {
+                                if (node.id == 'local' ||
+                                    !state.nativePeers.any((peer) => peer.id == node.id)) {
+                                  return;
+                                }
+                                context.go(
+                                  '/messages?destination=' +
+                                      Uri.encodeComponent(node.id),
+                                );
+                              },
+                            ),
                     ),
                   );
                   final events = _Panel(

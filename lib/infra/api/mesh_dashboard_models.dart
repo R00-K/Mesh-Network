@@ -87,12 +87,8 @@ class MeshDashboardState {
       .where((peer) => peer.status == PeerStatus.connected)
       .length;
 
-  /// Uses real discovered peers when available; otherwise shows optional demo data.
+  /// Shows only the local device and currently discovered real peers.
   List<MeshNode> get topologyNodes {
-    if (nativePeers.isEmpty) {
-      return simulationEnabled ? nodes : const [];
-    }
-
     final realNodes = <MeshNode>[
       const MeshNode(
         id: 'local',

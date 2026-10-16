@@ -20,6 +20,7 @@ class MeshDiscoveryManager(
     private val onDiscoveryStateChanged: (Boolean) -> Unit = {},
     private val onPeersChanged: () -> Unit = {},
     private val onConnectionChanged: () -> Unit = {},
+    private val onLocalDeviceIdChanged: (String) -> Unit = {},
 ) {
     private val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
     private val channel = manager.initialize(context, Looper.getMainLooper(), null)
@@ -38,6 +39,7 @@ class MeshDiscoveryManager(
             context.registerReceiver(receiver, filter(), receiverFlags())
             registered = true
         }
+        requestLocalDevice()
         discover()
     }
 
@@ -77,6 +79,14 @@ class MeshDiscoveryManager(
     internal fun requestPeers() {
         if (!hasDiscoveryPermission()) return
         manager.requestPeers(channel) { devices -> updatePeers(devices.deviceList) }
+    }
+
+    internal fun requestLocalDevice() {
+        if (!hasDiscoveryPermission() || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        manager.requestDeviceInfo(channel) { device ->
+            val address = device?.deviceAddress
+            if (!address.isNullOrBlank()) onLocalDeviceIdChanged(address)
+        }
     }
 
     internal fun updatePeers(devices: Collection<WifiP2pDevice>) {

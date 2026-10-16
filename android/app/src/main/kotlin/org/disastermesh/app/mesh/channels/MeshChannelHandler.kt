@@ -21,7 +21,6 @@ import org.json.JSONObject
 import org.json.JSONArray
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import android.provider.Settings
 
 /** Initial Flutter bridge for the native mesh service boundary. */
 class MeshChannelHandler(
@@ -46,10 +45,7 @@ class MeshChannelHandler(
         )
     }
     private val routeEvaluator = AdaptiveRouteEvaluator(context.applicationContext)
-    private val localNodeId = Settings.Secure.getString(
-        context.contentResolver,
-        Settings.Secure.ANDROID_ID,
-    ) ?: "android-node"
+    private var localNodeId = "android-node"
     private val transport = MeshTransport(
         logger = logger,
         onStateChanged = { state ->
@@ -85,6 +81,10 @@ class MeshChannelHandler(
         },
         onPeersChanged = { emitPeers() },
         onConnectionChanged = { connection.refreshConnectionInfo() },
+        onLocalDeviceIdChanged = { id ->
+            localNodeId = id
+            emit("LocalDeviceChanged", mapOf("id" to id))
+        },
     )
     private var eventSink: EventChannel.EventSink? = null
     private var running = false
@@ -167,7 +167,7 @@ class MeshChannelHandler(
                     val sent = sendStoredMessage(envelope)
                     emit(
                         "MessageStatusChanged",
-                        mapOf("id" to id, "status" to if (sent) "sent" else "queued"),
+                        mapOf("id" to id, "status" to if (sent) "awaiting_ack" else "queued"),
                     )
                     result.success(id)
                 }

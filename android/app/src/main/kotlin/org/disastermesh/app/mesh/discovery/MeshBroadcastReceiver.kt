@@ -20,7 +20,10 @@ class MeshBroadcastReceiver(
                 logger.info("wifi_direct_connection_changed")
                 onConnectionChanged()
             }
-            WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> logger.debug("local_device_changed")
+            WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION -> {
+                logger.debug("local_device_changed")
+                discovery.requestLocalDevice()
+            }
         }
     }
 }

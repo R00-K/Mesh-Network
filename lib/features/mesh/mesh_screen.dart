@@ -22,22 +22,6 @@ class MeshScreen extends ConsumerWidget {
           'Connected real peers: ${state.connectedPeerCount}',
         ),
         const SizedBox(height: 16),
-        if (state.simulationEnabled) ...[
-          const Text('Demo data', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          ...state.nodes.map((node) => Card(
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: node.connected ? const Color(0xff39d98a) : Colors.grey,
-                  child: const Icon(Icons.person_outline, color: Colors.black),
-                ),
-                title: Text(node.name),
-                subtitle: Text('${node.battery}% battery  •  ${node.latency} ms  •  signal ${node.signal}%'),
-                trailing: Text(node.role.name.toUpperCase()),
-              ),
-            )),
-        ],
-        const SizedBox(height: 12),
         const Text('Real Wi‑Fi Direct peers', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
         if (state.nativePeers.isEmpty)
