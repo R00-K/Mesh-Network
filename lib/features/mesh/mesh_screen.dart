@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../infra/api/mesh_dashboard_controller.dart';
 import '../../shared/models/mesh_models.dart';
@@ -52,19 +53,31 @@ class MeshScreen extends ConsumerWidget {
                   ),
                   title: Text(peer.deviceName),
                   subtitle: Text(peer.id),
-                  trailing: peer.status == PeerStatus.connected
-                      ? TextButton(
-                          onPressed: ref
-                              .read(meshDashboardProvider.notifier)
-                              .disconnectPeer,
-                          child: const Text('Disconnect'),
-                        )
-                      : TextButton(
-                          onPressed: () => ref
-                              .read(meshDashboardProvider.notifier)
-                              .connectPeer(peer.id),
-                          child: const Text('Connect'),
+                  trailing: Wrap(
+                    spacing: 4,
+                    children: [
+                      if (peer.status == PeerStatus.connected)
+                        TextButton(
+                          onPressed: () => context.go(
+                            '/messages?destination=${Uri.encodeComponent(peer.id)}',
+                          ),
+                          child: const Text('Message'),
                         ),
+                      peer.status == PeerStatus.connected
+                          ? TextButton(
+                              onPressed: ref
+                                  .read(meshDashboardProvider.notifier)
+                                  .disconnectPeer,
+                              child: const Text('Disconnect'),
+                            )
+                          : TextButton(
+                              onPressed: () => ref
+                                  .read(meshDashboardProvider.notifier)
+                                  .connectPeer(peer.id),
+                              child: const Text('Connect'),
+                            ),
+                    ],
+                  ),
                 ),
               )),
       ],

@@ -6,7 +6,9 @@ import '../../services/repositories/mesh_repository.dart';
 
 /// Single-hop text messaging screen.
 class MessagesScreen extends ConsumerStatefulWidget {
-  const MessagesScreen({super.key});
+  const MessagesScreen({super.key, this.destination});
+
+  final String? destination;
 
   @override
   ConsumerState<MessagesScreen> createState() => _MessagesScreenState();
@@ -16,6 +18,12 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
   final _destination = TextEditingController();
   final _payload = TextEditingController();
   bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _destination.text = widget.destination ?? '';
+  }
 
   @override
   void dispose() {

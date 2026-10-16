@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../infra/api/mesh_dashboard_controller.dart';
 import '../../shared/widgets/mesh_metric_card.dart';
@@ -101,7 +102,18 @@ class DashboardScreen extends ConsumerWidget {
                     icon: Icons.account_tree_outlined,
                     child: SizedBox(
                       height: 320,
-                      child: MeshTopology(nodes: state.topologyNodes),
+                      child: MeshTopology(
+                        nodes: state.topologyNodes,
+                        onNodeTap: (node) {
+                          if (node.id == 'local' ||
+                              !state.nativePeers.any((peer) => peer.id == node.id)) {
+                            return;
+                          }
+                          context.go(
+                            '/messages?destination=${Uri.encodeComponent(node.id)}',
+                          );
+                        },
+                      ),
                     ),
                   );
                   final events = _Panel(

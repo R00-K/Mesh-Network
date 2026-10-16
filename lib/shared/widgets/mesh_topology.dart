@@ -4,9 +4,10 @@ import '../../infra/api/mesh_dashboard_models.dart';
 
 /// Interactive animated topology view for the current mesh snapshot.
 class MeshTopology extends StatefulWidget {
-  const MeshTopology({required this.nodes, super.key});
+  const MeshTopology({required this.nodes, this.onNodeTap, super.key});
 
   final List<MeshNode> nodes;
+  final ValueChanged<MeshNode>? onNodeTap;
 
   @override
   State<MeshTopology> createState() => _MeshTopologyState();
@@ -61,6 +62,10 @@ class _MeshTopologyState extends State<MeshTopology>
           .distance;
       return da < db ? a : b;
     });
+    if (widget.onNodeTap != null) {
+      widget.onNodeTap!(node);
+      return;
+    }
     showModalBottomSheet<void>(
       context: context,
       builder: (_) => ListTile(

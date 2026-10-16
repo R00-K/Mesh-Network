@@ -22,7 +22,12 @@ GoRouter createAppRouter({String initialLocation = '/login'}) {
       routes: [
         GoRoute(path: '/', builder: (context, state) => const DashboardScreen()),
         GoRoute(path: '/mesh', builder: (context, state) => const MeshScreen()),
-        GoRoute(path: '/messages', builder: (context, state) => const MessagesScreen()),
+        GoRoute(
+          path: '/messages',
+          builder: (context, state) => MessagesScreen(
+            destination: state.uri.queryParameters['destination'],
+          ),
+        ),
         GoRoute(path: '/emergency', builder: (context, state) => const EmergencyScreen()),
         GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
       ],
