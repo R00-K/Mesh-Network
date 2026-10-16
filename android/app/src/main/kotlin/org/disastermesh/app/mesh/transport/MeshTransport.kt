@@ -11,6 +11,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.CopyOnWriteArrayList
 import org.json.JSONObject
 import org.disastermesh.core.logging.MeshLogger
 
@@ -23,8 +24,7 @@ class MeshTransport(
     private val executor: ExecutorService = Executors.newCachedThreadPool()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var serverSocket: ServerSocket? = null
-    private var socket: Socket? = null
-    private var writer: BufferedWriter? = null
+    private val links = CopyOnWriteArrayList<Link>()
 
     @Synchronized
     fun start(isGroupOwner: Boolean, groupOwnerAddress: String?) {
@@ -40,30 +40,36 @@ class MeshTransport(
 
     @Synchronized
     fun send(envelope: JSONObject): Boolean {
-        val currentWriter = writer ?: return false
-        return try {
-            currentWriter.write(envelope.toString())
-            currentWriter.newLine()
-            currentWriter.flush()
-            true
-        } catch (error: Exception) {
-            logger.warn("mesh_send_failed", mapOf("error" to (error.message ?: "unknown")))
-            emitState("disconnected")
-            false
+        if (links.isEmpty()) return false
+        var sent = false
+        links.toList().forEach { link ->
+            try {
+                synchronized(link.writer) {
+                    link.writer.write(envelope.toString())
+                    link.writer.newLine()
+                    link.writer.flush()
+                }
+                sent = true
+            } catch (error: Exception) {
+                logger.warn("mesh_send_failed", mapOf("error" to (error.message ?: "unknown")))
+                removeLink(link)
+            }
         }
+        return sent
     }
 
     @Synchronized
     fun stop() {
         try {
-            writer?.close()
-            socket?.close()
+            links.forEach { link ->
+                link.writer.close()
+                link.socket.close()
+            }
             serverSocket?.close()
         } catch (_: Exception) {
             // Closing an already closed transport is safe.
         } finally {
-            writer = null
-            socket = null
+            links.clear()
             serverSocket = null
         }
     }
@@ -73,8 +79,9 @@ class MeshTransport(
             val server = ServerSocket(PORT)
             synchronized(this) { serverSocket = server }
             emitState("listening")
-            val accepted = server.accept()
-            attach(accepted)
+            while (!server.isClosed) {
+                attach(server.accept())
+            }
         } catch (error: Exception) {
             logger.warn("mesh_listener_failed", mapOf("error" to (error.message ?: "unknown")))
             emitState("failed")
@@ -93,10 +100,11 @@ class MeshTransport(
     }
 
     private fun attach(connected: Socket) {
-        synchronized(this) {
-            socket = connected
-            writer = BufferedWriter(OutputStreamWriter(connected.getOutputStream(), Charsets.UTF_8))
-        }
+        val link = Link(
+            socket = connected,
+            writer = BufferedWriter(OutputStreamWriter(connected.getOutputStream(), Charsets.UTF_8)),
+        )
+        links += link
         emitState("connected")
         executor.execute {
             try {
@@ -108,14 +116,20 @@ class MeshTransport(
             } catch (error: Exception) {
                 logger.warn("mesh_socket_read_failed", mapOf("error" to (error.message ?: "unknown")))
             } finally {
-                synchronized(this) {
-                    if (socket === connected) {
-                        writer = null
-                        socket = null
-                    }
-                }
-                emitState("disconnected")
+                removeLink(link)
             }
+        }
+    }
+
+    private fun removeLink(link: Link) {
+        if (links.remove(link)) {
+            try {
+                link.writer.close()
+                link.socket.close()
+            } catch (_: Exception) {
+                // The peer may already have closed the socket.
+            }
+            if (links.isEmpty()) emitState("disconnected")
         }
     }
 
@@ -127,4 +141,9 @@ class MeshTransport(
         const val PORT = 8988
         const val CONNECT_TIMEOUT_MS = 5_000
     }
+
+    private data class Link(
+        val socket: Socket,
+        val writer: BufferedWriter,
+    )
 }

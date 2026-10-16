@@ -13,6 +13,7 @@ import org.disastermesh.app.mesh.transport.MeshTransport
 import org.disastermesh.app.mesh.storage.MessageStore
 import org.disastermesh.core.logging.MeshLogger
 import org.json.JSONObject
+import org.json.JSONArray
 import java.util.UUID
 import android.provider.Settings
 
@@ -122,7 +123,8 @@ class MeshChannelHandler(
                         .put("destination", destination)
                         .put("payload", payload)
                         .put("createdAt", System.currentTimeMillis())
-                        .put("hopLimit", 1)
+                        .put("hopLimit", 4)
+                        .put("path", JSONArray().put(localNodeId))
                     messageStore.enqueue(envelope)
                     val sent = sendStoredMessage(envelope)
                     emit(
@@ -214,8 +216,10 @@ class MeshChannelHandler(
         when (envelope.optString("type")) {
             "ack" -> {
                 val id = envelope.optString("id")
-                messageStore.markDelivered(id)
-                emit("MessageStatusChanged", mapOf("id" to id, "status" to "delivered"))
+                if (envelope.optString("destination") == localNodeId) {
+                    messageStore.markDelivered(id)
+                    emit("MessageStatusChanged", mapOf("id" to id, "status" to "delivered"))
+                }
             }
             "message" -> handleIncomingMessage(envelope)
         }
@@ -223,24 +227,45 @@ class MeshChannelHandler(
 
     private fun handleIncomingMessage(envelope: JSONObject) {
         val id = envelope.optString("id")
-        if (envelope.optString("destination") != localNodeId) return
+        val path = envelope.optJSONArray("path") ?: JSONArray()
+        if (containsPath(path, localNodeId)) {
+            emit("MessageStatusChanged", mapOf("id" to id, "status" to "loop_ignored"))
+            return
+        }
 
         val firstDelivery = messageStore.markSeen(id)
-        sendAcknowledgement(envelope)
         if (!firstDelivery) {
             emit("MessageStatusChanged", mapOf("id" to id, "status" to "duplicate_ignored"))
             return
         }
 
+        if (envelope.optString("destination") == localNodeId) {
+            sendAcknowledgement(envelope)
+            emit(
+                "MessageReceived",
+                mapOf(
+                    "id" to id,
+                    "source" to envelope.optString("source"),
+                    "destination" to envelope.optString("destination"),
+                    "payload" to envelope.optString("payload"),
+                    "createdAt" to envelope.optLong("createdAt"),
+                ),
+            )
+            return
+        }
+
+        val remainingHops = envelope.optInt("hopLimit", 0)
+        if (remainingHops <= 1) {
+            emit("MessageStatusChanged", mapOf("id" to id, "status" to "expired"))
+            return
+        }
+        path.put(localNodeId)
+        envelope.put("path", path)
+        envelope.put("hopLimit", remainingHops - 1)
+        val forwarded = transport.send(envelope)
         emit(
-            "MessageReceived",
-            mapOf(
-                "id" to id,
-                "source" to envelope.optString("source"),
-                "destination" to envelope.optString("destination"),
-                "payload" to envelope.optString("payload"),
-                "createdAt" to envelope.optLong("createdAt"),
-            ),
+            "MessageStatusChanged",
+            mapOf("id" to id, "status" to if (forwarded) "forwarded" else "forward_failed"),
         )
     }
 
@@ -272,4 +297,7 @@ class MeshChannelHandler(
             )
         }
     }
+
+    private fun containsPath(path: JSONArray, nodeId: String): Boolean =
+        (0 until path.length()).any { path.optString(it) == nodeId }
 }
