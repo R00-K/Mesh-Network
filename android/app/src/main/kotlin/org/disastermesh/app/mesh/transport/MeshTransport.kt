@@ -25,13 +25,20 @@ class MeshTransport(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var serverSocket: ServerSocket? = null
     private val links = CopyOnWriteArrayList<Link>()
+    private var activeGroupOwner: Boolean? = null
+    private var activeAddress: String? = null
 
     val connectedLinkCount: Int
         get() = links.size
 
     @Synchronized
     fun start(isGroupOwner: Boolean, groupOwnerAddress: String?) {
+        if (activeGroupOwner == isGroupOwner && activeAddress == groupOwnerAddress) {
+            return
+        }
         stop()
+        activeGroupOwner = isGroupOwner
+        activeAddress = groupOwnerAddress
         if (isGroupOwner) {
             executor.execute { listen() }
         } else if (!groupOwnerAddress.isNullOrBlank()) {
@@ -74,6 +81,8 @@ class MeshTransport(
         } finally {
             links.clear()
             serverSocket = null
+            activeGroupOwner = null
+            activeAddress = null
         }
     }
 
