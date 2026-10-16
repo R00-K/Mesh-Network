@@ -87,6 +87,43 @@ class MeshDashboardState {
       .where((peer) => peer.status == PeerStatus.connected)
       .length;
 
+  /// Uses real discovered peers when available; otherwise shows optional demo data.
+  List<MeshNode> get topologyNodes {
+    if (nativePeers.isEmpty) {
+      return simulationEnabled ? nodes : const [];
+    }
+
+    final realNodes = <MeshNode>[
+      const MeshNode(
+        id: 'local',
+        name: 'This device',
+        battery: 0,
+        signal: 0,
+        latency: 0,
+        position: Offset(.5, .5),
+        role: MeshNodeRole.local,
+      ),
+    ];
+    for (var index = 0; index < nativePeers.length; index++) {
+      final peer = nativePeers[index];
+      realNodes.add(
+        MeshNode(
+          id: peer.id,
+          name: peer.deviceName,
+          battery: peer.batteryLevel.round(),
+          signal: peer.signalStrength.round(),
+          latency: peer.latencyMs.round(),
+          position: Offset(
+            .2 + (index % 3) * .3,
+            .2 + (index ~/ 3) * .3,
+          ),
+          connected: peer.status == PeerStatus.connected,
+        ),
+      );
+    }
+    return realNodes;
+  }
+
   int get averageBattery {
     if (nodes.isEmpty) return 0;
     return nodes.map((node) => node.battery).reduce((a, b) => a + b) ~/

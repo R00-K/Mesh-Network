@@ -101,7 +101,7 @@ class DashboardScreen extends ConsumerWidget {
                     icon: Icons.account_tree_outlined,
                     child: SizedBox(
                       height: 320,
-                      child: MeshTopology(nodes: state.nodes),
+                      child: MeshTopology(nodes: state.topologyNodes),
                     ),
                   );
                   final events = _Panel(
