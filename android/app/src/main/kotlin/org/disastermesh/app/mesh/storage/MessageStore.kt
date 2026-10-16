@@ -48,7 +48,7 @@ class MessageStore(context: Context) {
         if (id.isBlank()) return false
         val seen = seenIds().toMutableSet()
         if (!seen.add(id)) return false
-        val trimmed = seen.takeLast(MAX_SEEN_IDS)
+        val trimmed = seen.toList().takeLast(MAX_SEEN_IDS)
         val array = JSONArray()
         trimmed.forEach { array.put(it) }
         preferences.edit().putString(SEEN_KEY, array.toString()).apply()
