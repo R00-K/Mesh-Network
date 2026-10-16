@@ -57,6 +57,15 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
     await ref.read(meshChannelProvider).disconnectPeer();
   }
 
+  void addOutgoingMessage(String id, String text) {
+    state = state.copyWith(
+      chatMessages: [
+        ...state.chatMessages,
+        MeshChatMessage(id: id, text: text, incoming: false),
+      ],
+    );
+  }
+
   void _handleNativeEvent(Map<String, dynamic> event) {
     final payload = Map<String, dynamic>.from(event['payload'] as Map? ?? {});
     if (event['type'] == 'MeshStatusChanged') {
@@ -82,6 +91,15 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
       final source = payload['source'] ?? 'unknown';
       final message = payload['payload'] ?? '';
       state = state.copyWith(
+        chatMessages: [
+          ...state.chatMessages,
+          MeshChatMessage(
+            id: payload['id'] as String? ?? DateTime.now().toIso8601String(),
+            text: message.toString(),
+            incoming: true,
+            status: 'received',
+          ),
+        ],
         messageLog: ['Received from $source: $message', ...state.messageLog]
             .take(50)
             .toList(growable: false),
@@ -90,6 +108,10 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
       final id = payload['id'] ?? 'unknown';
       final status = payload['status'] ?? 'unknown';
       state = state.copyWith(
+        chatMessages: [
+          for (final message in state.chatMessages)
+            message.id == id ? message.copyWith(status: status) : message,
+        ],
         messageLog: ['Message $id: $status', ...state.messageLog]
             .take(50)
             .toList(growable: false),

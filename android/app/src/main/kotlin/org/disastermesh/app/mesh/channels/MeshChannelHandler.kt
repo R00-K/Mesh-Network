@@ -82,7 +82,7 @@ class MeshChannelHandler(
         onPeersChanged = { emitPeers() },
         onConnectionChanged = { connection.refreshConnectionInfo() },
         onLocalDeviceIdChanged = { id ->
-            localNodeId = id
+            localNodeId = id.lowercase()
             emit("LocalDeviceChanged", mapOf("id" to id))
         },
     )
@@ -158,7 +158,7 @@ class MeshChannelHandler(
                         .put("type", "message")
                         .put("id", id)
                         .put("source", localNodeId)
-                        .put("destination", destination)
+                        .put("destination", destination.trim().lowercase())
                         .put("payload", payload)
                         .put("createdAt", System.currentTimeMillis())
                         .put("hopLimit", 4)
@@ -256,7 +256,7 @@ class MeshChannelHandler(
         when (envelope.optString("type")) {
             "ack" -> {
                 val id = envelope.optString("id")
-                if (envelope.optString("destination") == localNodeId) {
+                if (envelope.optString("destination").lowercase() == localNodeId) {
                     messageStore.markDelivered(id)
                     val latency = sentAt.remove(id)?.let { System.currentTimeMillis() - it }
                     metrics.recordAcknowledgement(latency)
@@ -289,7 +289,7 @@ class MeshChannelHandler(
             return
         }
 
-        if (envelope.optString("destination") == localNodeId) {
+        if (envelope.optString("destination").lowercase() == localNodeId) {
             sendAcknowledgement(envelope)
             emit(
                 "MessageReceived",
@@ -325,7 +325,7 @@ class MeshChannelHandler(
                 .put("type", "ack")
                 .put("id", message.optString("id"))
                 .put("source", localNodeId)
-                .put("destination", message.optString("source"))
+                .put("destination", message.optString("source").lowercase())
                 .put("createdAt", System.currentTimeMillis()),
         )
     }

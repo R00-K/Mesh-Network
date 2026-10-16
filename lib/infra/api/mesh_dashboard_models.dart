@@ -45,6 +45,27 @@ class MeshEvent {
   final Color color;
 }
 
+class MeshChatMessage {
+  const MeshChatMessage({
+    required this.id,
+    required this.text,
+    required this.incoming,
+    this.status = 'sending',
+  });
+
+  final String id;
+  final String text;
+  final bool incoming;
+  final String status;
+
+  MeshChatMessage copyWith({String? status}) => MeshChatMessage(
+        id: id,
+        text: text,
+        incoming: incoming,
+        status: status ?? this.status,
+      );
+}
+
 /// Snapshot consumed by the dashboard widgets.
 class MeshDashboardState {
   const MeshDashboardState({
@@ -54,6 +75,7 @@ class MeshDashboardState {
     this.nodes = const [],
     this.nativePeers = const [],
     this.messageLog = const [],
+    this.chatMessages = const [],
     this.nativeMetrics = const {},
     this.routingEvaluation = const {},
     this.events = const [],
@@ -72,6 +94,7 @@ class MeshDashboardState {
   final List<MeshNode> nodes;
   final List<Peer> nativePeers;
   final List<String> messageLog;
+  final List<MeshChatMessage> chatMessages;
   final Map<String, dynamic> nativeMetrics;
   final Map<String, dynamic> routingEvaluation;
   final List<MeshEvent> events;
@@ -133,6 +156,7 @@ class MeshDashboardState {
     List<MeshNode>? nodes,
     List<Peer>? nativePeers,
     List<String>? messageLog,
+    List<MeshChatMessage>? chatMessages,
     Map<String, dynamic>? nativeMetrics,
     Map<String, dynamic>? routingEvaluation,
     List<MeshEvent>? events,
@@ -151,6 +175,7 @@ class MeshDashboardState {
       nodes: nodes ?? this.nodes,
       nativePeers: nativePeers ?? this.nativePeers,
       messageLog: messageLog ?? this.messageLog,
+      chatMessages: chatMessages ?? this.chatMessages,
       nativeMetrics: nativeMetrics ?? this.nativeMetrics,
       routingEvaluation: routingEvaluation ?? this.routingEvaluation,
       events: events ?? this.events,

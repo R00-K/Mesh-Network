@@ -36,10 +36,13 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
     if (_destination.text.trim().isEmpty || _payload.text.isEmpty) return;
     setState(() => _sending = true);
     try {
-      await ref.read(meshChannelProvider).sendMessage(
+      final id = await ref.read(meshChannelProvider).sendMessage(
             destination: _destination.text.trim(),
             payload: _payload.text,
           );
+      if (id != null) {
+        ref.read(meshDashboardProvider.notifier).addOutgoingMessage(id, _payload.text);
+      }
       _payload.clear();
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -80,16 +83,39 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
           label: Text(_sending ? 'Sending…' : 'Send offline message'),
         ),
         const SizedBox(height: 18),
-        const Text('Transport events', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('Conversation', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
-        if (state.messageLog.isEmpty)
-          const Card(child: ListTile(title: Text('No message events yet.')))
+        if (state.chatMessages.isEmpty)
+          const Card(child: ListTile(title: Text('No messages yet.')))
         else
-          ...state.messageLog.map((message) => Card(
-                child: ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.message_outlined),
-                  title: Text(message),
+          ...state.chatMessages.map((message) => Align(
+                alignment: message.incoming
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 320),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: message.incoming
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(message.text),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        message.status,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
                 ),
               )),
       ],
