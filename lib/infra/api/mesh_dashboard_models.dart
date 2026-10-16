@@ -78,6 +78,7 @@ class MeshDashboardState {
     this.chatMessages = const [],
     this.nativeMetrics = const {},
     this.routingEvaluation = const {},
+    this.transportState = 'disconnected',
     this.events = const [],
     this.pendingMessages = 0,
     this.activeRoutes = 0,
@@ -97,6 +98,7 @@ class MeshDashboardState {
   final List<MeshChatMessage> chatMessages;
   final Map<String, dynamic> nativeMetrics;
   final Map<String, dynamic> routingEvaluation;
+  final String transportState;
   final List<MeshEvent> events;
   final int pendingMessages;
   final int activeRoutes;
@@ -159,6 +161,7 @@ class MeshDashboardState {
     List<MeshChatMessage>? chatMessages,
     Map<String, dynamic>? nativeMetrics,
     Map<String, dynamic>? routingEvaluation,
+    String? transportState,
     List<MeshEvent>? events,
     int? pendingMessages,
     int? activeRoutes,
@@ -178,6 +181,7 @@ class MeshDashboardState {
       chatMessages: chatMessages ?? this.chatMessages,
       nativeMetrics: nativeMetrics ?? this.nativeMetrics,
       routingEvaluation: routingEvaluation ?? this.routingEvaluation,
+      transportState: transportState ?? this.transportState,
       events: events ?? this.events,
       pendingMessages: pendingMessages ?? this.pendingMessages,
       activeRoutes: activeRoutes ?? this.activeRoutes,

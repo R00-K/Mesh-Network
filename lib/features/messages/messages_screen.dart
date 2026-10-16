@@ -58,6 +58,8 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
         Text('Offline Messages', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 6),
         const Text('Single-hop text over the active Wi-Fi Direct connection.'),
+        const SizedBox(height: 6),
+        Text('Transport: ${state.transportState}'),
         const SizedBox(height: 16),
         TextField(
           controller: _destination,

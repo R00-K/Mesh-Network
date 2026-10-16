@@ -45,7 +45,7 @@ class MeshChannelHandler(
         )
     }
     private val routeEvaluator = AdaptiveRouteEvaluator(context.applicationContext)
-    private var localNodeId = "android-node"
+    private var localNodeId = normalizeNodeId("android-node")
     private val transport = MeshTransport(
         logger = logger,
         onStateChanged = { state ->
@@ -82,7 +82,7 @@ class MeshChannelHandler(
         onPeersChanged = { emitPeers() },
         onConnectionChanged = { connection.refreshConnectionInfo() },
         onLocalDeviceIdChanged = { id ->
-            localNodeId = id.lowercase()
+            localNodeId = normalizeNodeId(id)
             emit("LocalDeviceChanged", mapOf("id" to id))
         },
     )
@@ -158,7 +158,7 @@ class MeshChannelHandler(
                         .put("type", "message")
                         .put("id", id)
                         .put("source", localNodeId)
-                        .put("destination", destination.trim().lowercase())
+                        .put("destination", normalizeNodeId(destination))
                         .put("payload", payload)
                         .put("createdAt", System.currentTimeMillis())
                         .put("hopLimit", 4)
@@ -250,13 +250,19 @@ class MeshChannelHandler(
     }
 
     private fun peerStatus(peerId: String): String =
-        if (connection.isConnected && connection.connectedPeerId == peerId) "connected" else "nearby"
+        if (connection.isConnected &&
+            normalizeNodeId(connection.connectedPeerId.orEmpty()) == normalizeNodeId(peerId)
+        ) {
+            "connected"
+        } else {
+            "nearby"
+        }
 
     private fun handleEnvelope(envelope: JSONObject) {
         when (envelope.optString("type")) {
             "ack" -> {
                 val id = envelope.optString("id")
-                if (envelope.optString("destination").lowercase() == localNodeId) {
+                if (normalizeNodeId(envelope.optString("destination")) == localNodeId) {
                     messageStore.markDelivered(id)
                     val latency = sentAt.remove(id)?.let { System.currentTimeMillis() - it }
                     metrics.recordAcknowledgement(latency)
@@ -289,7 +295,7 @@ class MeshChannelHandler(
             return
         }
 
-        if (envelope.optString("destination").lowercase() == localNodeId) {
+        if (normalizeNodeId(envelope.optString("destination")) == localNodeId) {
             sendAcknowledgement(envelope)
             emit(
                 "MessageReceived",
@@ -325,7 +331,7 @@ class MeshChannelHandler(
                 .put("type", "ack")
                 .put("id", message.optString("id"))
                 .put("source", localNodeId)
-                .put("destination", message.optString("source").lowercase())
+                .put("destination", normalizeNodeId(message.optString("source")))
                 .put("createdAt", System.currentTimeMillis()),
         )
     }
@@ -362,7 +368,10 @@ class MeshChannelHandler(
     }
 
     private fun containsPath(path: JSONArray, nodeId: String): Boolean =
-        (0 until path.length()).any { path.optString(it) == nodeId }
+        (0 until path.length()).any { normalizeNodeId(path.optString(it)) == nodeId }
+
+    private fun normalizeNodeId(value: String): String =
+        value.trim().lowercase().replace(":", "").replace("-", "")
 
     private fun scheduleLinkRecovery() {
         val peerId = connection.connectedPeerId ?: return
