@@ -52,7 +52,19 @@ class MeshScreen extends ConsumerWidget {
                   ),
                   title: Text(peer.deviceName),
                   subtitle: Text(peer.id),
-                  trailing: Text(peer.status.name.toUpperCase()),
+                  trailing: peer.status == PeerStatus.connected
+                      ? TextButton(
+                          onPressed: ref
+                              .read(meshDashboardProvider.notifier)
+                              .disconnectPeer,
+                          child: const Text('Disconnect'),
+                        )
+                      : TextButton(
+                          onPressed: () => ref
+                              .read(meshDashboardProvider.notifier)
+                              .connectPeer(peer.id),
+                          child: const Text('Connect'),
+                        ),
                 ),
               )),
       ],

@@ -28,6 +28,13 @@ class MeshChannel {
   /// Requests nearby peer discovery.
   Future<void> discoverPeers() async => invoke<void>('discoverPeers');
 
+  /// Connects to a selected Wi-Fi Direct peer.
+  Future<void> connectPeer(String peerId) async =>
+      invoke<void>('connectPeer', <String, dynamic>{'peerId': peerId});
+
+  /// Removes the current Wi-Fi Direct group connection.
+  Future<void> disconnectPeer() async => invoke<void>('disconnectPeer');
+
   /// Reads the current peer list from Android.
   Future<List<Peer>> getPeers() async {
     final value = await invoke<List<dynamic>>('getPeers') ?? const [];

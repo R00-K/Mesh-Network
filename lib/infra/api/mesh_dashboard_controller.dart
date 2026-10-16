@@ -49,6 +49,14 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
     }
   }
 
+  Future<void> connectPeer(String peerId) async {
+    await ref.read(meshChannelProvider).connectPeer(peerId);
+  }
+
+  Future<void> disconnectPeer() async {
+    await ref.read(meshChannelProvider).disconnectPeer();
+  }
+
   void _handleNativeEvent(Map<String, dynamic> event) {
     final payload = Map<String, dynamic>.from(event['payload'] as Map? ?? {});
     if (event['type'] == 'MeshStatusChanged') {

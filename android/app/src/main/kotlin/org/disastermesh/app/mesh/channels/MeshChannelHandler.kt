@@ -7,6 +7,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.disastermesh.app.mesh.discovery.MeshDiscoveryManager
+import org.disastermesh.app.mesh.connection.WifiDirectConnectionManager
 import org.disastermesh.app.mesh.service.MeshForegroundService
 import org.disastermesh.core.logging.MeshLogger
 
@@ -16,6 +17,14 @@ class MeshChannelHandler(
     private val logger: MeshLogger,
     private val requestPermissions: () -> Unit,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+    private val connection = WifiDirectConnectionManager(
+        context = context.applicationContext,
+        logger = logger,
+        onStateChanged = { state, peerId ->
+            emit("ConnectionChanged", mapOf("state" to state, "peerId" to peerId))
+            emitPeers()
+        },
+    )
     private val discovery = MeshDiscoveryManager(
         context = context.applicationContext,
         logger = logger,
@@ -23,6 +32,7 @@ class MeshChannelHandler(
             emit("MeshStatusChanged", mapOf("running" to running, "discovering" to active))
         },
         onPeersChanged = { emitPeers() },
+        onConnectionChanged = { connection.refreshConnectionInfo() },
     )
     private var eventSink: EventChannel.EventSink? = null
     private var running = false
@@ -50,15 +60,28 @@ class MeshChannelHandler(
                 discovery.discover()
                 result.success(null)
             }
-            "connectPeer", "disconnectPeer" -> {
+            "connectPeer" -> {
                 val peerId = call.argument<String>("peerId")
                 if (peerId.isNullOrBlank()) {
                     result.error("INVALID_ARGUMENT", "peerId is required", null)
                 } else {
-                    logger.info(call.method, mapOf("peerId" to peerId))
+                    connection.connect(peerId)
+                    logger.info("connect_peer", mapOf("peerId" to peerId))
                     result.success(null)
                 }
             }
+            "disconnectPeer" -> {
+                connection.disconnect()
+                logger.info("disconnect_peer")
+                result.success(null)
+            }
+            "getConnectionInfo" -> result.success(
+                mapOf(
+                    "peerId" to connection.connectedPeerId,
+                    "groupOwnerAddress" to connection.groupOwnerAddress,
+                    "isGroupOwner" to connection.isGroupOwner,
+                ),
+            )
             "sendMessage" -> result.success(null)
             "getPeers" -> {
                 val peers = discovery.peers.value.map { peer ->
@@ -72,7 +95,7 @@ class MeshChannelHandler(
                         "packetLoss" to 0.0,
                         "load" to 0.0,
                         "lastSeen" to java.time.Instant.now().toString(),
-                        "status" to "nearby",
+                        "status" to peerStatus(peer.deviceAddress),
                     )
                 }
                 emit("PeerUpdate", mapOf("peers" to peers))
@@ -129,9 +152,12 @@ class MeshChannelHandler(
                 "packetLoss" to 0.0,
                 "load" to 0.0,
                 "lastSeen" to java.time.Instant.now().toString(),
-                "status" to "nearby",
+                "status" to peerStatus(peer.deviceAddress),
             )
         }
         emit("PeerUpdate", mapOf("peers" to peers))
     }
+
+    private fun peerStatus(peerId: String): String =
+        if (connection.isConnected && connection.connectedPeerId == peerId) "connected" else "nearby"
 }

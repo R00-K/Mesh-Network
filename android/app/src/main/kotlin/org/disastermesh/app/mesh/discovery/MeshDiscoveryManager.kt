@@ -19,11 +19,12 @@ class MeshDiscoveryManager(
     private val logger: MeshLogger,
     private val onDiscoveryStateChanged: (Boolean) -> Unit = {},
     private val onPeersChanged: () -> Unit = {},
+    private val onConnectionChanged: () -> Unit = {},
 ) {
     private val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
     private val channel = manager.initialize(context, Looper.getMainLooper(), null)
     private val _peers = MutableStateFlow<List<WifiP2pDevice>>(emptyList())
-    private val receiver = MeshBroadcastReceiver(this, logger)
+    private val receiver = MeshBroadcastReceiver(this, logger, onConnectionChanged)
     private var registered = false
     var isDiscovering: Boolean = false
         private set
