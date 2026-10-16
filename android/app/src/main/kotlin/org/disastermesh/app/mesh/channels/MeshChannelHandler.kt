@@ -11,6 +11,9 @@ import org.disastermesh.app.mesh.connection.WifiDirectConnectionManager
 import org.disastermesh.app.mesh.service.MeshForegroundService
 import org.disastermesh.app.mesh.transport.MeshTransport
 import org.disastermesh.app.mesh.storage.MessageStore
+import org.disastermesh.app.mesh.routing.RouteCoordinator
+import android.os.Handler
+import android.os.Looper
 import org.disastermesh.core.logging.MeshLogger
 import org.json.JSONObject
 import org.json.JSONArray
@@ -24,6 +27,18 @@ class MeshChannelHandler(
     private val requestPermissions: () -> Unit,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     private val messageStore = MessageStore(context.applicationContext)
+    private val recoveryHandler = Handler(Looper.getMainLooper())
+    private val routeCoordinator = RouteCoordinator(logger) { route ->
+        emit(
+            "RouteChanged",
+            mapOf(
+                "status" to route.status,
+                "destination" to route.destination,
+                "hops" to route.hops,
+                "reason" to route.reason,
+            ),
+        )
+    }
     private val localNodeId = Settings.Secure.getString(
         context.contentResolver,
         Settings.Secure.ANDROID_ID,
@@ -32,7 +47,9 @@ class MeshChannelHandler(
         logger = logger,
         onStateChanged = { state ->
             emit("TransportChanged", mapOf("state" to state))
+            routeCoordinator.transportChanged(state, connection.connectedPeerId)
             if (state == "connected") retryPendingMessages()
+            if (state == "disconnected" || state == "failed") scheduleLinkRecovery()
         },
         onEnvelopeReceived = ::handleEnvelope,
     )
@@ -46,6 +63,7 @@ class MeshChannelHandler(
             } else if (state == "disconnected" || state == "failed") {
                 transport.stop()
             }
+            routeCoordinator.connectionChanged(state, peerId)
             emit("ConnectionChanged", mapOf("state" to state, "peerId" to peerId))
             emitPeers()
         },
@@ -76,6 +94,8 @@ class MeshChannelHandler(
                 running = false
                 pendingStart = false
                 transport.stop()
+                recoveryHandler.removeCallbacksAndMessages(null)
+                routeCoordinator.noRoute("mesh_stopped")
                 discovery.stop()
                 context.stopService(Intent(context, MeshForegroundService::class.java))
                 logger.info("mesh_stopped")
@@ -107,6 +127,14 @@ class MeshChannelHandler(
                     "peerId" to connection.connectedPeerId,
                     "groupOwnerAddress" to connection.groupOwnerAddress,
                     "isGroupOwner" to connection.isGroupOwner,
+                ),
+            )
+            "getRoute" -> result.success(
+                mapOf(
+                    "status" to routeCoordinator.snapshot.status,
+                    "destination" to routeCoordinator.snapshot.destination,
+                    "hops" to routeCoordinator.snapshot.hops,
+                    "reason" to routeCoordinator.snapshot.reason,
                 ),
             )
             "sendMessage" -> {
@@ -153,7 +181,6 @@ class MeshChannelHandler(
                 result.success(peers)
             }
             "getMetrics" -> result.success(emptyMap<String, Any?>())
-            "getRoute" -> result.success(null)
             else -> result.notImplemented()
         }
     }
@@ -300,4 +327,22 @@ class MeshChannelHandler(
 
     private fun containsPath(path: JSONArray, nodeId: String): Boolean =
         (0 until path.length()).any { path.optString(it) == nodeId }
+
+    private fun scheduleLinkRecovery() {
+        val peerId = connection.connectedPeerId ?: return
+        routeCoordinator.connectionChanged("failed", peerId)
+        recoveryHandler.removeCallbacksAndMessages(null)
+        recoveryHandler.postDelayed(
+            {
+                if (connection.isConnected) {
+                    connection.refreshConnectionInfo()
+                }
+            },
+            RECOVERY_DELAY_MS,
+        )
+    }
+
+    private companion object {
+        const val RECOVERY_DELAY_MS = 2_000L
+    }
 }

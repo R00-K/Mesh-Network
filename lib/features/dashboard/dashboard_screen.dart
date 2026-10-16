@@ -139,9 +139,15 @@ class DashboardScreen extends ConsumerWidget {
                 icon: Icons.route_outlined,
                 child: ListTile(
                   leading: const Icon(Icons.my_location, color: Color(0xff42a5f5)),
-                  title: const Text('YOU  →  Alpha  →  Charlie'),
+                  title: Text(
+                    state.routeDestination == null
+                        ? 'No active route'
+                        : 'YOU  →  ${state.routeDestination}',
+                  ),
                   subtitle: Text(
-                    'Cost ${state.routeCost.toStringAsFixed(2)}  •  ${state.routeLatency} ms  •  2 hops',
+                    '${state.routeStatus.toUpperCase()}'
+                    '${state.routeReason == null ? '' : '  •  ${state.routeReason}'}'
+                    '  •  Cost ${state.routeCost.toStringAsFixed(2)}',
                   ),
                   trailing: OutlinedButton(
                     onPressed: controller.recalculateRoute,

@@ -56,9 +56,12 @@ class MeshDashboardState {
     this.messageLog = const [],
     this.events = const [],
     this.pendingMessages = 0,
-    this.activeRoutes = 1,
+    this.activeRoutes = 0,
     this.routeCost = 1.42,
     this.routeLatency = 38,
+    this.routeStatus = 'no_route',
+    this.routeDestination,
+    this.routeReason,
   });
 
   final bool isActive;
@@ -72,6 +75,9 @@ class MeshDashboardState {
   final int activeRoutes;
   final double routeCost;
   final int routeLatency;
+  final String routeStatus;
+  final String? routeDestination;
+  final String? routeReason;
 
   int get connectedPeerCount => nativePeers
       .where((peer) => peer.status == PeerStatus.connected)
@@ -95,6 +101,9 @@ class MeshDashboardState {
     int? activeRoutes,
     double? routeCost,
     int? routeLatency,
+    String? routeStatus,
+    String? routeDestination,
+    String? routeReason,
   }) {
     return MeshDashboardState(
       isActive: isActive ?? this.isActive,
@@ -108,6 +117,9 @@ class MeshDashboardState {
       activeRoutes: activeRoutes ?? this.activeRoutes,
       routeCost: routeCost ?? this.routeCost,
       routeLatency: routeLatency ?? this.routeLatency,
+      routeStatus: routeStatus ?? this.routeStatus,
+      routeDestination: routeDestination ?? this.routeDestination,
+      routeReason: routeReason ?? this.routeReason,
     );
   }
 }

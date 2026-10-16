@@ -86,6 +86,14 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
             .take(50)
             .toList(growable: false),
       );
+    } else if (event['type'] == 'RouteChanged') {
+      final status = payload['status'] as String? ?? 'no_route';
+      state = state.copyWith(
+        routeStatus: status,
+        routeDestination: payload['destination'] as String?,
+        routeReason: payload['reason'] as String?,
+        activeRoutes: status == 'active' ? 1 : 0,
+      );
     }
   }
 
