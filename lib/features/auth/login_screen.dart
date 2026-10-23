@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../infra/services/auth_state.dart';
+import '../../infra/services/remembered_credentials.dart';
 
 /// Email/password entry point for the application.
 class LoginScreen extends ConsumerStatefulWidget {
@@ -18,8 +21,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _rememberedCredentials = RememberedCredentials();
   bool _obscurePassword = true;
   bool _isCreateAccount = false;
+  bool _rememberMe = false;
+  bool _credentialsLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadRememberedCredentials());
+  }
+
+  Future<void> _loadRememberedCredentials() async {
+    try {
+      final credentials = await _rememberedCredentials.read();
+      if (mounted &&
+          credentials != null &&
+          _emailController.text.isEmpty &&
+          _passwordController.text.isEmpty) {
+        setState(() {
+          _emailController.text = credentials.email;
+          _passwordController.text = credentials.password;
+          _rememberMe = true;
+        });
+      }
+    } catch (_) {
+      // Login remains available if secure storage is unavailable.
+    } finally {
+      if (mounted) setState(() => _credentialsLoaded = true);
+    }
+  }
 
   @override
   void dispose() {
@@ -31,6 +63,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _submit() async {
+    if (!_credentialsLoaded) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final controller = ref.read(authControllerProvider.notifier);
     final success = _isCreateAccount
@@ -41,7 +74,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             password: _passwordController.text,
           )
         : await controller.signIn(email: _emailController.text, password: _passwordController.text);
-    if (success && mounted) context.go('/');
+    if (!success) return;
+    if (!_isCreateAccount) {
+      try {
+        if (_rememberMe) {
+          await _rememberedCredentials.save(
+            email: _emailController.text,
+            password: _passwordController.text,
+          );
+        } else {
+          await _rememberedCredentials.clear();
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not save the remembered sign-in on this device.')),
+          );
+        }
+      }
+    }
+    if (mounted) context.go('/');
   }
 
   @override
@@ -159,6 +211,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                   validator: (value) => value == null || value.length < 6 ? 'Use at least 6 characters' : null,
                                 ),
+                                if (!_isCreateAccount)
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    value: _rememberMe,
+                                    onChanged: (value) => setState(
+                                      () => _rememberMe = value ?? false,
+                                    ),
+                                    title: const Text('Remember me'),
+                                    subtitle: const Text(
+                                      'Save this sign-in securely on this device',
+                                    ),
+                                    controlAffinity: ListTileControlAffinity.leading,
+                                  ),
                                 if (authState.errorMessage != null) ...[
                                   const SizedBox(height: 12),
                                   Container(
@@ -169,11 +234,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 ],
                                 const SizedBox(height: 22),
                                 FilledButton(
-                                  onPressed: authState.isLoading ? null : _submit,
+                                  onPressed: authState.isLoading || !_credentialsLoaded
+                                      ? null
+                                      : _submit,
                                   style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
                                   child: authState.isLoading
                                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                                      : Text(_isCreateAccount ? 'Create account' : 'Sign in'),
+                                      : Text(
+                                          _isCreateAccount
+                                              ? 'Create account'
+                                              : _rememberMe
+                                                  ? 'Continue'
+                                                  : 'Sign in',
+                                        ),
                                 ),
                                 const SizedBox(height: 14),
                                 TextButton(
@@ -199,7 +272,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      Text('Authentication will be connected to Firebase in the next step.', textAlign: TextAlign.center, style: textTheme.bodySmall),
+                      Text('Your account is secured with Firebase Authentication.', textAlign: TextAlign.center, style: textTheme.bodySmall),
                     ],
                   ),
                 ),

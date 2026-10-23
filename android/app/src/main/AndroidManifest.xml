@@ -9,7 +9,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="Disaster Mesh"
+        android:roundIcon="@mipmap/ic_launcher"
         android:name="${applicationName}">
         <activity
             android:name=".MainActivity"

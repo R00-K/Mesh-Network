@@ -21,7 +21,7 @@ class EmergencyScreen extends StatelessWidget {
         const SizedBox(height: 16),
         ...actions.map((action) => Card(
               child: ListTile(
-                leading: Icon(action.$2, color: const Color(0xffff7043)),
+                leading: Icon(action.$2, color: Theme.of(context).colorScheme.error),
                 title: Text(action.$1),
                 subtitle: Text(action.$3),
                 trailing: const Icon(Icons.chevron_right),

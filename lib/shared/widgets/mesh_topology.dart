@@ -36,7 +36,11 @@ class _MeshTopologyState extends State<MeshTopology>
           return GestureDetector(
             onTapUp: (details) => _showNode(context, details.localPosition),
             child: CustomPaint(
-              painter: _TopologyPainter(widget.nodes, _pulse.value),
+              painter: _TopologyPainter(
+                widget.nodes,
+                _pulse.value,
+                Theme.of(context).colorScheme,
+              ),
               size: Size(constraints.maxWidth, constraints.maxHeight),
             ),
           );
@@ -78,10 +82,11 @@ class _MeshTopologyState extends State<MeshTopology>
 }
 
 class _TopologyPainter extends CustomPainter {
-  const _TopologyPainter(this.nodes, this.pulse);
+  const _TopologyPainter(this.nodes, this.pulse, this.colors);
 
   final List<MeshNode> nodes;
   final double pulse;
+  final ColorScheme colors;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -90,7 +95,7 @@ class _TopologyPainter extends CustomPainter {
         node.id: Offset(node.position.dx * size.width, node.position.dy * size.height),
     };
     final linkPaint = Paint()
-      ..color = const Color(0xff1f5270)
+      ..color = colors.outlineVariant
       ..strokeWidth = 1.5;
     for (var i = 1; i < nodes.length; i++) {
       canvas.drawLine(points['local']!, points[nodes[i].id]!, linkPaint);
@@ -101,10 +106,10 @@ class _TopologyPainter extends CustomPainter {
     for (final node in nodes) {
       final point = points[node.id]!;
       final color = switch (node.role) {
-        MeshNodeRole.local => const Color(0xff42a5f5),
-        MeshNodeRole.relay => const Color(0xff64ff8c),
-        MeshNodeRole.destination => const Color(0xffffb74d),
-        MeshNodeRole.peer => const Color(0xff39d98a),
+        MeshNodeRole.local => colors.primary,
+        MeshNodeRole.relay => colors.secondary,
+        MeshNodeRole.destination => colors.tertiary,
+        MeshNodeRole.peer => colors.primary,
       };
       canvas.drawCircle(point, 19 + (node.role == MeshNodeRole.local ? pulse * 4 : 0),
           Paint()..color = color.withAlpha(45));
@@ -112,7 +117,7 @@ class _TopologyPainter extends CustomPainter {
       final textPainter = TextPainter(
         text: TextSpan(
           text: node.name,
-          style: const TextStyle(color: Colors.white, fontSize: 10),
+          style: TextStyle(color: colors.onSurface, fontSize: 10),
         ),
         textDirection: TextDirection.ltr,
       )..layout();

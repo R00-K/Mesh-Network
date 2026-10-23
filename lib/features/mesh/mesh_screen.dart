@@ -9,9 +9,35 @@ import '../../shared/models/mesh_models.dart';
 class MeshScreen extends ConsumerWidget {
   const MeshScreen({super.key});
 
+  Future<void> _connect(
+      BuildContext context, WidgetRef ref, String address) async {
+    try {
+      await ref.read(meshDashboardProvider.notifier).connectPeer(address);
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not connect to peer: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _disconnect(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(meshDashboardProvider.notifier).disconnectPeer();
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not disconnect: $error')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(meshDashboardProvider);
+    final colors = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -19,51 +45,118 @@ class MeshScreen extends ConsumerWidget {
         const SizedBox(height: 6),
         Text(
           'Discovery: ${state.isDiscovering ? 'active' : 'inactive'}  •  '
-          'Connected real peers: ${state.connectedPeerCount}',
+          'Connected peers: ${state.connectedPeerCount}',
         ),
         const SizedBox(height: 16),
-        const Text('Real Wi‑Fi Direct peers', style: TextStyle(fontWeight: FontWeight.bold)),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: () async {
+              try {
+                await ref.read(meshDashboardProvider.notifier).startDiscovery();
+              } catch (error) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not start discovery: $error')),
+                  );
+                }
+              }
+            },
+            icon: const Icon(Icons.wifi_find),
+            label: Text(state.isDiscovering ? 'Scan again' : 'Start discovery'),
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text('Nearby Wi-Fi Direct devices',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
         if (state.nativePeers.isEmpty)
           const Card(child: ListTile(title: Text('No real peers discovered')))
         else
-          ...state.nativePeers.map((peer) => Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: peer.status == PeerStatus.connected
-                        ? const Color(0xff39d98a)
-                        : Colors.grey,
-                    child: const Icon(Icons.wifi, color: Colors.black),
-                  ),
-                  title: Text(peer.deviceName),
-                  subtitle: Text(peer.id),
-                  trailing: Wrap(
-                    spacing: 4,
-                    children: [
-                      if (peer.status == PeerStatus.connected)
-                        TextButton(
-                          onPressed: () => context.go(
-                            '/messages?destination=${Uri.encodeComponent(peer.id)}',
-                          ),
-                          child: const Text('Message'),
-                        ),
-                      peer.status == PeerStatus.connected
-                          ? TextButton(
-                              onPressed: ref
-                                  .read(meshDashboardProvider.notifier)
-                                  .disconnectPeer,
-                              child: const Text('Disconnect'),
-                            )
-                          : TextButton(
-                              onPressed: () => ref
-                                  .read(meshDashboardProvider.notifier)
-                                  .connectPeer(peer.id),
-                              child: const Text('Connect'),
-                            ),
-                    ],
+          ...state.nativePeers.map((peer) {
+            final isCurrentPeer = state.connectionPeerAddress == peer.id;
+            final transportReady = isCurrentPeer &&
+                state.transportState == 'connected' &&
+                state.connectionPeerNodeId.isNotEmpty;
+            final isConnecting = isCurrentPeer &&
+                (state.connectionState == 'connecting' ||
+                    state.connectionState == 'connected' &&
+                        state.transportState != 'failed' &&
+                        state.transportState != 'disconnected' &&
+                        !transportReady);
+            final isConnected = transportReady ||
+                peer.status == PeerStatus.connected && isCurrentPeer;
+            return Card(
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor:
+                      isConnected ? colors.primary : colors.surfaceContainerHighest,
+                  child: Icon(
+                    Icons.wifi,
+                    color: isConnected ? colors.onPrimary : colors.onSurfaceVariant,
                   ),
                 ),
-              )),
+                title: Text(peer.deviceName),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Wi-Fi Direct address: ${peer.id}'),
+                    if (transportReady)
+                      Text('Node ID: ${state.connectionPeerNodeId}')
+                    else if (isConnecting)
+                      const Text('Verifying peer identity…')
+                    else if (isCurrentPeer &&
+                        state.connectionState == 'connected' &&
+                        state.transportState == 'failed')
+                      Text(
+                        state.transportError.isEmpty
+                            ? 'Messaging link failed. Disconnect, then reconnect.'
+                            : 'Messaging link failed: ${state.transportError}',
+                      )
+                    else if (isCurrentPeer &&
+                        state.connectionState == 'connected' &&
+                        state.transportState == 'disconnected')
+                      const Text('Messaging link is not connected. Disconnect, then reconnect.')
+                    else if (isCurrentPeer && state.connectionState == 'failed')
+                      const Text('Connection failed. Try again.'),
+                  ],
+                ),
+                isThreeLine: transportReady || isConnecting,
+                trailing: Wrap(
+                  spacing: 4,
+                  children: [
+                    if (transportReady)
+                      TextButton(
+                        onPressed: () => context.go(
+                          '/messages?destination=${Uri.encodeComponent(peer.id)}',
+                        ),
+                        child: const Text('Message'),
+                      )
+                    else if (isConnecting)
+                      const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    else
+                      TextButton(
+                        onPressed: () => _connect(context, ref, peer.id),
+                        child: const Text('Connect'),
+                      ),
+                    if (isCurrentPeer &&
+                        state.connectionState != 'disconnected')
+                      TextButton(
+                        onPressed: () => _disconnect(context, ref),
+                        child: const Text('Disconnect'),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }),
       ],
     );
   }

@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../infra/api/mesh_dashboard_controller.dart';
 import '../../services/repositories/mesh_repository.dart';
 
-/// Single-hop text messaging screen.
+/// Direct conversation with the currently identified Wi-Fi Direct peer.
 class MessagesScreen extends ConsumerStatefulWidget {
   const MessagesScreen({super.key, this.destination});
 
+  /// Wi-Fi Direct transport address selected on the mesh screen.
   final String? destination;
 
   @override
@@ -15,35 +18,62 @@ class MessagesScreen extends ConsumerStatefulWidget {
 }
 
 class _MessagesScreenState extends ConsumerState<MessagesScreen> {
-  final _destination = TextEditingController();
   final _payload = TextEditingController();
   bool _sending = false;
 
   @override
-  void initState() {
-    super.initState();
-    _destination.text = widget.destination ?? '';
-  }
-
-  @override
   void dispose() {
-    _destination.dispose();
     _payload.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
-    if (_destination.text.trim().isEmpty || _payload.text.isEmpty) return;
+  void _showMessage(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  Future<void> _send(String targetAddress) async {
+    final current = ref.read(meshDashboardProvider);
+    if (current.transportState != 'connected' ||
+        current.connectionPeerAddress != targetAddress ||
+        current.connectionPeerNodeId.isEmpty) {
+      _showMessage(
+          'This peer is not connected and verified. Reconnect from Mesh Nodes.');
+      return;
+    }
+    final text = _payload.text;
+    if (text.trim().isEmpty) return;
     setState(() => _sending = true);
     try {
-      final id = await ref.read(meshChannelProvider).sendMessage(
-            destination: _destination.text.trim(),
-            payload: _payload.text,
+      final result = await ref.read(meshChannelProvider).sendMessage(
+            destination: targetAddress,
+            payload: text,
           );
-      if (id != null) {
-        ref.read(meshDashboardProvider.notifier).addOutgoingMessage(id, _payload.text);
+      final id = result?['id'] as String?;
+      final status = result?['status'] as String? ?? 'queued';
+      if (id == null) throw PlatformException(code: 'EMPTY_RESPONSE');
+      ref.read(meshDashboardProvider.notifier).addOutgoingMessage(
+            id: id,
+            peerId: current.connectionPeerNodeId,
+            text: text,
+            status: status,
+          );
+      if (status == 'sent' || status == 'delivered') {
+        _payload.clear();
+      } else if (status == 'queued') {
+        // Native storage has accepted the message into its durable outbox.
+        // Clear the composer so it is not accidentally submitted twice.
+        _payload.clear();
+        _showMessage('Message saved to the outbox and will retry automatically.');
+      } else {
+        _showMessage('Message was not sent. Your draft is still here.');
       }
-      _payload.clear();
+    } on PlatformException catch (error) {
+      _showMessage(error.message ??
+          'The message could not be sent. Your draft is still here.');
+    } catch (error) {
+      _showMessage('The message could not be sent: $error');
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -52,25 +82,59 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(meshDashboardProvider);
+    final targetAddress = widget.destination ?? state.connectionPeerAddress;
+    var peerName = 'Selected peer';
+    for (final candidate in state.nativePeers) {
+      if (candidate.id == targetAddress) {
+        peerName = candidate.deviceName;
+        break;
+      }
+    }
+    final connected = targetAddress.isNotEmpty &&
+        state.transportState == 'connected' &&
+        state.connectionPeerAddress == targetAddress &&
+        state.connectionPeerNodeId.isNotEmpty;
+    final conversationPeerId = connected
+        ? state.connectionPeerNodeId
+        : state.peerNodeIds[targetAddress] ?? '';
+    final conversation = conversationPeerId.isEmpty
+        ? const []
+        : state.chatMessages
+            .where((message) => message.peerId == conversationPeerId)
+            .toList(growable: false);
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Offline Messages', style: Theme.of(context).textTheme.headlineSmall),
+        Text('Messages', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 6),
-        const Text('Single-hop text over the active Wi-Fi Direct connection.'),
-        const SizedBox(height: 6),
-        Text('Transport: ${state.transportState}'),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _destination,
-          decoration: const InputDecoration(
-            labelText: 'Destination peer ID',
-            border: OutlineInputBorder(),
+        const Text(
+            'Direct text messages over one verified Wi-Fi Direct connection.'),
+        const SizedBox(height: 14),
+        Card(
+          child: ListTile(
+            leading: Icon(connected ? Icons.verified_user : Icons.wifi_off),
+            title: Text(targetAddress.isEmpty ? 'No peer selected' : peerName),
+            subtitle: Text(
+              connected
+                  ? 'Node ID: ${state.connectionPeerNodeId}'
+                  : targetAddress.isEmpty
+                      ? 'Select and connect to a discovered node first.'
+                      : 'Connection: ${state.connectionState}; transport: ${state.transportState}'
+                          '${state.transportError.isEmpty ? '' : '\n${state.transportError}'}',
+            ),
+            trailing: targetAddress.isEmpty
+                ? TextButton(
+                    onPressed: () => context.go('/mesh'),
+                    child: const Text('Find a peer'),
+                  )
+                : null,
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         TextField(
           controller: _payload,
+          enabled: connected && !_sending,
           minLines: 2,
           maxLines: 5,
           decoration: const InputDecoration(
@@ -80,24 +144,33 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
         ),
         const SizedBox(height: 10),
         FilledButton.icon(
-          onPressed: _sending ? null : _send,
+          onPressed: connected && !_sending ? () => _send(targetAddress) : null,
           icon: const Icon(Icons.send),
-          label: Text(_sending ? 'Sending…' : 'Send offline message'),
+          label: Text(_sending ? 'Sending…' : 'Send'),
         ),
         const SizedBox(height: 18),
-        const Text('Conversation', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('Conversation',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
-        if (state.chatMessages.isEmpty)
-          const Card(child: ListTile(title: Text('No messages yet.')))
+        if (targetAddress.isEmpty)
+          const Card(
+            child: ListTile(
+              title: Text('Select a discovered peer from Mesh Nodes.'),
+            ),
+          )
+        else if (conversation.isEmpty)
+          const Card(
+              child: ListTile(title: Text('No messages with this peer yet.')))
         else
-          ...state.chatMessages.map((message) => Align(
+          ...conversation.map((message) => Align(
                 alignment: message.incoming
                     ? Alignment.centerLeft
                     : Alignment.centerRight,
                 child: Container(
                   constraints: const BoxConstraints(maxWidth: 320),
                   margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: message.incoming
                         ? Theme.of(context).colorScheme.surfaceContainerHighest

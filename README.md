@@ -1,54 +1,49 @@
 # Disaster Mesh
 
-A Flutter front end with a native Kotlin core for a disaster-resilient, Wi-Fi-based mesh communication system.
+Flutter UI with an Android Kotlin transport for direct text messaging over Wi-Fi Direct.
 
-## Current milestone
+## Current behavior
 
-Phase 1 and Phase 2 are implemented:
+- Android devices discover peers using Wi-Fi Direct and form a TCP link on the group network.
+- A persistent app-install UUID identifies a node. The TCP hello exchange verifies the remote UUID before messaging is enabled.
+- Messages are persisted locally, use a stable ID, and receive `queued`, `sent`, `delivered`, or `failed` state updates. `delivered` requires an acknowledgement from the intended node.
+- Incoming messages are persisted and deduplicated before display. A duplicate retry is acknowledged without displaying it again.
+- Retries use 1, 2, 4, 8, and 16 second delays, followed by a final 16 second acknowledgement window. Messages expire after 24 hours.
+- The supported messaging path is direct and single-hop between the two connected Android devices. The app does not currently forward messages through intermediate nodes.
 
-- `mesh-core` contains platform-independent Kotlin domain models, configuration, and logging interfaces.
-- `lib/` contains the Flutter application and presentation layer.
-- `android/` contains the native Android host and Flutter method-channel bridge.
-- No Wi-Fi, Wi-Fi Direct, discovery, routing, or physical networking is implemented yet.
+The current TCP hello establishes a peer identity association but does not provide cryptographic authentication or encryption. Treat this as a development transport, not a secure channel for sensitive content. Android Wi-Fi Direct behavior, permissions, and background execution also vary by device and OS version.
 
-## Architecture
+## Run on Android devices
 
-```text
-Flutter application (`lib/`)
-        |
-Flutter method channel
-        |
-Native Android Kotlin bridge (`android/`)
-        |
-Platform-independent native mesh core (`mesh-core`)
-        |
-Future: discovery -> metrics -> topology -> cost engine -> routing -> messaging
-```
+1. Install and launch the app on two Android devices with Wi-Fi Direct support.
+2. Grant the requested nearby/Wi-Fi permissions on both devices and start mesh discovery.
+3. Open **Mesh Nodes**, select the other device, and connect. Wait for the verified node identity before opening its conversation.
+4. Send a message in each direction. Confirm the sender reaches `delivered` after the recipient receives it.
+5. For full coverage, follow [the two-device test matrix](MESSAGING_DEVICE_TEST_MATRIX.md).
 
-The core module is deliberately independent of Android and Flutter so routing and cost calculations can be tested on a desktop JVM.
+The dashboard's simulated nodes are not real peers and cannot receive messages.
 
-## Domain models
+## Project layout
 
-The initial models are `Node`, `NodeId`, `Neighbor`, `Link`, `Metric`, `LinkMetrics`, `Route`, and `Message`. They validate basic invariants such as metric ranges, positive TTLs, non-negative timestamps, and distinct link endpoints.
+- `lib/` contains Flutter screens, state, and the native method/event channel client.
+- `android/` contains Wi-Fi Direct discovery/connection, TCP transport, identity, message persistence, and protocol handling.
+- `mesh-core/` contains platform-independent Kotlin models and the retry policy.
+- [MESSAGING_PROTOCOL.md](MESSAGING_PROTOCOL.md) defines identity, validation, acknowledgement, retry, and expiry behavior.
+- [MESSAGING_IMPLEMENTATION_PLAN.md](MESSAGING_IMPLEMENTATION_PLAN.md) records phase status and remaining acceptance work.
 
-## Build and tests
-
-Use Flutter for the front end:
+## Build and checks
 
 ```bash
 flutter pub get
+flutter analyze
 flutter test
 flutter build apk
 ```
 
-The native core can be tested independently with a compatible Gradle 8.x installation:
+Run the platform-independent Kotlin unit tests with the repository Gradle wrapper:
 
 ```bash
-gradle :mesh-core:test
+./gradlew :mesh-core:test
 ```
 
-## Next milestone
-
-Add metric collector interfaces and deterministic simulated metric data, then implement normalized link-cost calculation with configurable weights and hard safety thresholds.
-
-Physical Wi-Fi networking will be added only after the core topology, cost, and routing components are tested.
+An Android build does not substitute for the two-device Wi-Fi Direct checks. Phase 5's hardware matrix is pending until two compatible devices can run the app.

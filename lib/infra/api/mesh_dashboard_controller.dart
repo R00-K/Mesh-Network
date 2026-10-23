@@ -8,27 +8,68 @@ import '../../services/repositories/mesh_repository.dart';
 import '../../shared/models/mesh_models.dart';
 import 'mesh_dashboard_models.dart';
 
-final meshDashboardProvider = NotifierProvider.autoDispose<
-    MeshDashboardController, MeshDashboardState>(MeshDashboardController.new);
+final meshDashboardProvider =
+    NotifierProvider.autoDispose<MeshDashboardController, MeshDashboardState>(
+        MeshDashboardController.new);
 
 /// Coordinates simulated dashboard data and the native mesh channel.
-class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
+class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
+    with WidgetsBindingObserver {
   Timer? _timer;
+  Timer? _eventReconnectTimer;
   StreamSubscription<Map<String, dynamic>>? _eventsSubscription;
+  final _observedMessageStatuses = <String, String>{};
   final _random = Random(7);
+  bool _disposed = false;
 
   @override
   MeshDashboardState build() {
+    _disposed = false;
+    WidgetsBinding.instance.addObserver(this);
     ref.onDispose(() {
+      _disposed = true;
       _timer?.cancel();
+      _eventReconnectTimer?.cancel();
       _eventsSubscription?.cancel();
+      WidgetsBinding.instance.removeObserver(this);
     });
     final nodes = _simulatedNodes();
     _timer = Timer.periodic(const Duration(seconds: 5), (_) => _tick());
-    final channel = ref.read(meshChannelProvider);
-    _eventsSubscription = channel.events.listen(_handleNativeEvent);
-    _loadNativePeers();
+    _subscribeToNativeEvents();
+    unawaited(refreshNativeState());
     return MeshDashboardState(nodes: nodes);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(refreshNativeState());
+      if (_eventsSubscription == null) _subscribeToNativeEvents();
+    }
+  }
+
+  void _subscribeToNativeEvents() {
+    if (_disposed) return;
+    _eventReconnectTimer?.cancel();
+    _eventsSubscription = ref.read(meshChannelProvider).events.listen(
+      _handleNativeEvent,
+      onError: (Object error, StackTrace stackTrace) {
+        _scheduleEventReconnect();
+      },
+      onDone: _scheduleEventReconnect,
+    );
+  }
+
+  void _scheduleEventReconnect() {
+    _eventsSubscription?.cancel();
+    _eventsSubscription = null;
+    if (_disposed) return;
+    _eventReconnectTimer?.cancel();
+    _eventReconnectTimer = Timer(const Duration(seconds: 2), () {
+      if (_disposed) return;
+      _subscribeToNativeEvents();
+      unawaited(refreshNativeState());
+    });
   }
 
   Future<void> startMesh() async {
@@ -40,10 +81,73 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
     }
   }
 
-  Future<void> _loadNativePeers() async {
+  Future<void> startDiscovery() async {
+    if (!state.isActive) {
+      await startMesh();
+      return;
+    }
+    await ref.read(meshChannelProvider).discoverPeers();
+  }
+
+  Future<void> refreshNativeState() async {
     try {
-      final peers = await ref.read(meshChannelProvider).getPeers();
-      state = state.copyWith(nativePeers: peers);
+      final channel = ref.read(meshChannelProvider);
+      final peers = await channel.getPeers();
+      final messages = await channel.getMessages();
+      final connection = await channel.getConnectionInfo();
+      if (_disposed) return;
+      final nativeAddress = connection['peerId'] as String? ?? '';
+      final nodeId = connection['peerNodeId'] as String? ?? '';
+      final transportState =
+          connection['transportState'] as String? ?? state.transportState;
+      final address = nativeAddress.isNotEmpty
+          ? nativeAddress
+          : transportState == 'connected'
+              ? state.connectionPeerAddress
+              : '';
+      final connected = connection['isConnected'] == true ||
+          transportState == 'connected' && nodeId.isNotEmpty;
+      final peerNodeIds = Map<String, String>.from(state.peerNodeIds);
+      if (address.isNotEmpty && nodeId.isNotEmpty) {
+        peerNodeIds[address] = nodeId;
+      }
+      final restoredById = <String, MeshChatMessage>{};
+      for (final message in messages) {
+        final id = message['id']?.toString() ?? '';
+        final peerId = message['direction'] == 'incoming'
+            ? message['source']?.toString() ?? ''
+            : message['destination']?.toString() ?? '';
+        if (id.isEmpty || peerId.isEmpty) continue;
+        final incoming = message['direction'] == 'incoming';
+        restoredById[id] = MeshChatMessage(
+          id: id,
+          peerId: peerId,
+          text: message['payload']?.toString() ?? '',
+          incoming: incoming,
+          status: _observedMessageStatuses[id] ??
+              (incoming
+                  ? 'received'
+                  : message['status']?.toString() ?? 'queued'),
+        );
+      }
+      for (final existing in state.chatMessages) {
+        restoredById[existing.id] = existing;
+      }
+      state = state.copyWith(
+        nativePeers: peers,
+        chatMessages: restoredById.values.toList(growable: false),
+        connectionState: connected
+            ? 'connected'
+            : address.isNotEmpty
+                ? 'connecting'
+                : 'disconnected',
+        connectionPeerAddress: address,
+        connectionPeerNodeId: nodeId,
+        transportState: transportState,
+        transportError:
+            connection['transportError'] as String? ?? state.transportError,
+        peerNodeIds: peerNodeIds,
+      );
     } catch (_) {
       // Native mesh is unavailable on non-Android platforms.
     }
@@ -57,12 +161,30 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
     await ref.read(meshChannelProvider).disconnectPeer();
   }
 
-  void addOutgoingMessage(String id, String text) {
+  void addOutgoingMessage({
+    required String id,
+    required String peerId,
+    required String text,
+    required String status,
+  }) {
+    final currentStatus = _observedMessageStatuses[id] ?? status;
+    final message = MeshChatMessage(
+      id: id,
+      peerId: peerId,
+      text: text,
+      incoming: false,
+      status: currentStatus,
+    );
+    final existingIndex =
+        state.chatMessages.indexWhere((item) => item.id == id);
+    final chatMessages = [...state.chatMessages];
+    if (existingIndex >= 0) {
+      chatMessages[existingIndex] = message;
+    } else {
+      chatMessages.add(message);
+    }
     state = state.copyWith(
-      chatMessages: [
-        ...state.chatMessages,
-        MeshChatMessage(id: id, text: text, incoming: false),
-      ],
+      chatMessages: chatMessages,
     );
   }
 
@@ -74,8 +196,49 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
         isDiscovering: payload['discovering'] as bool? ?? state.isDiscovering,
       );
     } else if (event['type'] == 'TransportChanged') {
+      final transportState = payload['state'] as String? ?? state.transportState;
       state = state.copyWith(
-        transportState: payload['state'] as String? ?? state.transportState,
+        transportState: transportState,
+        connectionState: transportState == 'connected'
+            ? 'connected'
+            : state.connectionState,
+        transportError: transportState == 'connecting' ||
+                transportState == 'connected'
+            ? ''
+            : payload['error'] as String? ?? state.transportError,
+      );
+    } else if (event['type'] == 'ConnectionChanged') {
+      var connectionState = payload['state'] as String? ?? 'unknown';
+      final transportVerified = state.transportState == 'connected' &&
+          state.connectionPeerNodeId.isNotEmpty;
+      if (connectionState == 'connecting' && transportVerified) {
+        connectionState = 'connected';
+      }
+      state = state.copyWith(
+        connectionState: connectionState,
+        connectionPeerAddress:
+            connectionState == 'disconnected' || connectionState == 'failed'
+                ? ''
+                : payload['peerId'] as String? ?? state.connectionPeerAddress,
+        connectionPeerNodeId: connectionState == 'connecting' ||
+                connectionState == 'disconnected' ||
+                connectionState == 'failed'
+            ? ''
+            : state.connectionPeerNodeId,
+      );
+    } else if (event['type'] == 'PeerIdentityChanged') {
+      final nodeId = payload['nodeId'] as String? ?? '';
+      final address =
+          payload['transportAddress'] as String? ?? state.connectionPeerAddress;
+      final peerNodeIds = Map<String, String>.from(state.peerNodeIds);
+      if (address.isNotEmpty && nodeId.isNotEmpty) {
+        peerNodeIds[address] = nodeId;
+      }
+      state = state.copyWith(
+        connectionState: nodeId.isNotEmpty ? 'connected' : state.connectionState,
+        connectionPeerNodeId: nodeId,
+        connectionPeerAddress: address,
+        peerNodeIds: peerNodeIds,
       );
     } else if (event['type'] == 'MetricsChanged') {
       state = state.copyWith(
@@ -95,15 +258,19 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
       final source = payload['source'] ?? 'unknown';
       final message = payload['payload'] ?? '';
       state = state.copyWith(
-        chatMessages: [
-          ...state.chatMessages,
-          MeshChatMessage(
-            id: payload['id'] as String? ?? DateTime.now().toIso8601String(),
-            text: message.toString(),
-            incoming: true,
-            status: 'received',
-          ),
-        ],
+        chatMessages: state.chatMessages.any((item) => item.id == payload['id'])
+            ? state.chatMessages
+            : [
+                ...state.chatMessages,
+                MeshChatMessage(
+                  id: payload['id'] as String? ??
+                      DateTime.now().toIso8601String(),
+                  peerId: source.toString(),
+                  text: message.toString(),
+                  incoming: true,
+                  status: 'received',
+                ),
+              ],
         messageLog: ['Received from $source: $message', ...state.messageLog]
             .take(50)
             .toList(growable: false),
@@ -111,6 +278,10 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
     } else if (event['type'] == 'MessageStatusChanged') {
       final id = payload['id'] ?? 'unknown';
       final status = payload['status'] ?? 'unknown';
+      _observedMessageStatuses[id.toString()] = status.toString();
+      if (_observedMessageStatuses.length > 500) {
+        _observedMessageStatuses.remove(_observedMessageStatuses.keys.first);
+      }
       state = state.copyWith(
         chatMessages: [
           for (final message in state.chatMessages)
@@ -148,7 +319,7 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState> {
           detail: 'Lowest-cost path selected',
           time: 'now',
           icon: Icons.alt_route,
-          color: Color(0xff42a5f5),
+          color: Color(0xff557b75),
         ),
         ...state.events,
       ].take(8).toList(),

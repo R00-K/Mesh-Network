@@ -9,6 +9,7 @@ import io.flutter.plugin.common.EventChannel
 import org.disastermesh.core.config.MeshConfiguration
 import org.disastermesh.core.model.NodeId
 import org.disastermesh.app.mesh.channels.MeshChannelHandler
+import org.disastermesh.app.mesh.identity.LocalNodeIdentity
 
 class MainActivity : FlutterActivity() {
     private val channelName = "disaster_mesh/mesh"
@@ -17,7 +18,9 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        val configuration = MeshConfiguration(localNodeId = NodeId("android-node"))
+        val configuration = MeshConfiguration(
+            localNodeId = NodeId(LocalNodeIdentity(applicationContext).nodeId),
+        )
         AndroidMeshLogger().info(
             "application_started",
             mapOf("nodeId" to configuration.localNodeId.toString()),
@@ -41,6 +44,12 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler(handler)
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "disaster_mesh/events")
             .setStreamHandler(handler)
+    }
+
+    override fun onDestroy() {
+        meshHandler?.detach()
+        meshHandler = null
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(

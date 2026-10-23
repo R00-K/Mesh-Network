@@ -35,7 +35,7 @@ class FirebaseAuthApi implements AuthApi {
       final credential = await _auth.signInWithEmailAndPassword(email: email.trim(), password: password);
       return _sessionFor(credential.user, fallbackEmail: email.trim());
     } on FirebaseAuthException catch (error) {
-      throw AuthApiException(_messageFor(error.code));
+      throw AuthApiException(_messageFor(error));
     }
   }
 
@@ -59,7 +59,7 @@ class FirebaseAuthApi implements AuthApi {
       });
       return _sessionFor(user, fallbackEmail: email.trim());
     } on FirebaseAuthException catch (error) {
-      throw AuthApiException(_messageFor(error.code));
+      throw AuthApiException(_messageFor(error));
     } on FirebaseException catch (error) {
       throw AuthApiException(
         error.code == 'permission-denied'
@@ -81,7 +81,7 @@ class FirebaseAuthApi implements AuthApi {
   @override
   Future<void> signOut() => _auth.signOut();
 
-  String _messageFor(String code) => switch (code) {
+  String _messageFor(FirebaseAuthException error) => switch (error.code) {
         'invalid-credential' || 'wrong-password' || 'user-not-found' => 'Email or password is incorrect.',
         'invalid-email' => 'Enter a valid email address.',
         'email-already-in-use' => 'An account already exists for this email.',
@@ -92,7 +92,9 @@ class FirebaseAuthApi implements AuthApi {
         'app-not-authorized' => 'This Android app is not authorized for the Firebase project.',
         'configuration-not-found' => 'Firebase Authentication is not configured for this project.',
         'internal-error' => 'Firebase returned an internal error. Try again.',
-        _ => 'Unable to complete authentication right now.',
+        _ => error.message?.trim().isNotEmpty == true
+            ? 'Authentication failed (${error.code}): ${error.message}'
+            : 'Authentication failed (${error.code}). Check the Firebase Authentication settings and try again.',
       };
 }
 

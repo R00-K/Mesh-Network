@@ -15,6 +15,7 @@ class DashboardScreen extends ConsumerWidget {
     final state = ref.watch(meshDashboardProvider);
     final controller = ref.read(meshDashboardProvider.notifier);
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final measuredBattery = state.nativeMetrics['batteryPercent'];
     return CustomScrollView(
       slivers: [
@@ -30,10 +31,14 @@ class DashboardScreen extends ConsumerWidget {
           actions: [
             _StatusChip(
               label: state.isActive ? 'MESH ACTIVE' : 'OFFLINE',
-              color: state.isActive ? const Color(0xff39d98a) : Colors.orange,
+              color: state.isActive ? colors.primary : colors.tertiary,
             ),
             const SizedBox(width: 12),
-            IconButton(onPressed: () {}, icon: const Icon(Icons.settings_outlined)),
+            IconButton(
+              onPressed: () => context.go('/settings'),
+              tooltip: 'Settings',
+              icon: const Icon(Icons.settings_outlined),
+            ),
           ],
         ),
         SliverPadding(
@@ -55,25 +60,26 @@ class DashboardScreen extends ConsumerWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 mainAxisSpacing: 10,
                 crossAxisSpacing: 10,
-                childAspectRatio: 1.7,
+                childAspectRatio:
+                    MediaQuery.sizeOf(context).width > 700 ? 1.7 : 1.5,
                 children: [
                   MeshMetricCard(
                     label: 'Connected Nodes',
                     value: '${state.connectedPeerCount}',
                     icon: Icons.hub_outlined,
-                    color: const Color(0xff42a5f5),
+                    color: colors.primary,
                   ),
                   MeshMetricCard(
                     label: 'Active Routes',
                     value: '${state.activeRoutes}',
                     icon: Icons.alt_route,
-                    color: const Color(0xff64ff8c),
+                    color: colors.secondary,
                   ),
                   MeshMetricCard(
                     label: 'Pending Messages',
                     value: '${state.pendingMessages}',
                     icon: Icons.mark_unread_chat_alt_outlined,
-                    color: Colors.orange,
+                    color: colors.tertiary,
                   ),
                   MeshMetricCard(
                     label: 'Device Battery',
@@ -81,7 +87,7 @@ class DashboardScreen extends ConsumerWidget {
                         ? '—'
                         : measuredBattery.toString() + '%',
                     icon: Icons.battery_5_bar,
-                    color: const Color(0xff64ff8c),
+                    color: colors.primary,
                   ),
                 ],
               ),
@@ -162,7 +168,7 @@ class DashboardScreen extends ConsumerWidget {
                 title: 'Active Route',
                 icon: Icons.route_outlined,
                 child: ListTile(
-                  leading: const Icon(Icons.my_location, color: Color(0xff42a5f5)),
+                  leading: Icon(Icons.my_location, color: colors.primary),
                   title: Text(
                     state.routeDestination == null
                         ? 'No active route'
@@ -220,13 +226,14 @@ class _Panel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [Icon(icon, size: 18, color: const Color(0xff42a5f5)), const SizedBox(width: 8), Text(title)]),
+            Row(children: [Icon(icon, size: 18, color: colors.primary), const SizedBox(width: 8), Text(title)]),
             const Divider(),
             child,
           ],

@@ -35,15 +35,26 @@ class MeshChannel {
   /// Removes the current Wi-Fi Direct group connection.
   Future<void> disconnectPeer() async => invoke<void>('disconnectPeer');
 
+  /// Reads the current Wi-Fi Direct and verified TCP peer state.
+  Future<Map<String, dynamic>> getConnectionInfo() async {
+    final value = await invoke<Map<dynamic, dynamic>>('getConnectionInfo');
+    return value == null ? const {} : Map<String, dynamic>.from(value);
+  }
+
   /// Sends a single-hop text message over the active Wi-Fi Direct link.
-  Future<String?> sendMessage({
+  Future<Map<String, dynamic>?> sendMessage({
     required String destination,
     required String payload,
-  }) {
-    return invoke<String>('sendMessage', <String, dynamic>{
-      'destination': destination,
-      'payload': payload,
-    });
+  }) async {
+    final value = await invoke<Map<dynamic, dynamic>>(
+      'sendMessage',
+      <String, dynamic>{
+        'destination': destination,
+        'payload': payload,
+      },
+    );
+    if (value == null) return null;
+    return Map<String, dynamic>.from(value);
   }
 
   /// Reads the current peer list from Android.
@@ -55,8 +66,18 @@ class MeshChannel {
         .toList(growable: false);
   }
 
+  /// Loads persisted direct-message history from Android.
+  Future<List<Map<String, dynamic>>> getMessages() async {
+    final value = await invoke<List<dynamic>>('getMessages') ?? const [];
+    return value
+        .whereType<Map<dynamic, dynamic>>()
+        .map((message) => Map<String, dynamic>.from(message))
+        .toList(growable: false);
+  }
+
   /// Subscribes to native peer, metric, route, message, and status events.
-  Stream<Map<String, dynamic>> get events => _events.receiveBroadcastStream().map(
-        (event) => Map<String, dynamic>.from(event as Map),
-      );
+  Stream<Map<String, dynamic>> get events =>
+      _events.receiveBroadcastStream().map(
+            (event) => Map<String, dynamic>.from(event as Map),
+          );
 }

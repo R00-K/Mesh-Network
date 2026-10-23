@@ -36,6 +36,9 @@ class AuthController extends Notifier<AuthState> {
     } on AuthApiException catch (error) {
       state = AuthState(errorMessage: error.message);
       return false;
+    } catch (error) {
+      state = AuthState(errorMessage: 'Sign-in failed: $error');
+      return false;
     }
   }
 
@@ -47,6 +50,9 @@ class AuthController extends Notifier<AuthState> {
       return true;
     } on AuthApiException catch (error) {
       state = AuthState(errorMessage: error.message);
+      return false;
+    } catch (error) {
+      state = AuthState(errorMessage: 'Account creation failed: $error');
       return false;
     }
   }

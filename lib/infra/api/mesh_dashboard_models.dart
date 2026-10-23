@@ -48,18 +48,21 @@ class MeshEvent {
 class MeshChatMessage {
   const MeshChatMessage({
     required this.id,
+    required this.peerId,
     required this.text,
     required this.incoming,
     this.status = 'sending',
   });
 
   final String id;
+  final String peerId;
   final String text;
   final bool incoming;
   final String status;
 
   MeshChatMessage copyWith({String? status}) => MeshChatMessage(
         id: id,
+        peerId: peerId,
         text: text,
         incoming: incoming,
         status: status ?? this.status,
@@ -79,6 +82,11 @@ class MeshDashboardState {
     this.nativeMetrics = const {},
     this.routingEvaluation = const {},
     this.transportState = 'disconnected',
+    this.transportError = '',
+    this.connectionState = 'disconnected',
+    this.connectionPeerAddress = '',
+    this.connectionPeerNodeId = '',
+    this.peerNodeIds = const {},
     this.events = const [],
     this.pendingMessages = 0,
     this.activeRoutes = 0,
@@ -99,6 +107,11 @@ class MeshDashboardState {
   final Map<String, dynamic> nativeMetrics;
   final Map<String, dynamic> routingEvaluation;
   final String transportState;
+  final String transportError;
+  final String connectionState;
+  final String connectionPeerAddress;
+  final String connectionPeerNodeId;
+  final Map<String, String> peerNodeIds;
   final List<MeshEvent> events;
   final int pendingMessages;
   final int activeRoutes;
@@ -108,9 +121,8 @@ class MeshDashboardState {
   final String? routeDestination;
   final String? routeReason;
 
-  int get connectedPeerCount => nativePeers
-      .where((peer) => peer.status == PeerStatus.connected)
-      .length;
+  int get connectedPeerCount =>
+      nativePeers.where((peer) => peer.status == PeerStatus.connected).length;
 
   /// Shows only the local device and currently discovered real peers.
   List<MeshNode> get topologyNodes {
@@ -162,6 +174,11 @@ class MeshDashboardState {
     Map<String, dynamic>? nativeMetrics,
     Map<String, dynamic>? routingEvaluation,
     String? transportState,
+    String? transportError,
+    String? connectionState,
+    String? connectionPeerAddress,
+    String? connectionPeerNodeId,
+    Map<String, String>? peerNodeIds,
     List<MeshEvent>? events,
     int? pendingMessages,
     int? activeRoutes,
@@ -182,6 +199,12 @@ class MeshDashboardState {
       nativeMetrics: nativeMetrics ?? this.nativeMetrics,
       routingEvaluation: routingEvaluation ?? this.routingEvaluation,
       transportState: transportState ?? this.transportState,
+      transportError: transportError ?? this.transportError,
+      connectionState: connectionState ?? this.connectionState,
+      connectionPeerAddress:
+          connectionPeerAddress ?? this.connectionPeerAddress,
+      connectionPeerNodeId: connectionPeerNodeId ?? this.connectionPeerNodeId,
+      peerNodeIds: peerNodeIds ?? this.peerNodeIds,
       events: events ?? this.events,
       pendingMessages: pendingMessages ?? this.pendingMessages,
       activeRoutes: activeRoutes ?? this.activeRoutes,
