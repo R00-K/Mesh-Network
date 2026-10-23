@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
+import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,9 +25,22 @@ class MeshDiscoveryManager(
 ) {
     private val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
     private val channel = manager.initialize(context, Looper.getMainLooper(), null)
+    private val peerRefreshHandler = Handler(Looper.getMainLooper())
     private val _peers = MutableStateFlow<List<WifiP2pDevice>>(emptyList())
     private val receiver = MeshBroadcastReceiver(this, logger, onConnectionChanged)
     private var registered = false
+    private val peerRefresh = object : Runnable {
+        override fun run() {
+            if (!registered) return
+            requestPeers()
+            peerRefreshHandler.postDelayed(this, PEER_REFRESH_INTERVAL_MS)
+        }
+    }
+    private val discoveryRetry = object : Runnable {
+        override fun run() {
+            if (registered && !isDiscovering) discover()
+        }
+    }
     var isDiscovering: Boolean = false
         private set
 
@@ -41,10 +55,13 @@ class MeshDiscoveryManager(
         }
         requestLocalDevice()
         discover()
+        peerRefreshHandler.removeCallbacks(peerRefresh)
+        peerRefreshHandler.post(peerRefresh)
     }
 
     /** Stops discovery and unregisters platform callbacks. */
     fun stop() {
+        peerRefreshHandler.removeCallbacksAndMessages(null)
         if (registered) {
             context.unregisterReceiver(receiver)
             registered = false
@@ -57,6 +74,7 @@ class MeshDiscoveryManager(
 
     /** Requests a new Wi-Fi Direct peer scan. */
     fun discover() {
+        peerRefreshHandler.removeCallbacks(discoveryRetry)
         if (!hasDiscoveryPermission()) {
             logger.warn("discovery_permission_missing")
             return
@@ -64,6 +82,7 @@ class MeshDiscoveryManager(
         manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 isDiscovering = true
+                peerRefreshHandler.removeCallbacks(discoveryRetry)
                 onDiscoveryStateChanged(true)
                 logger.info("discovery_started")
             }
@@ -72,6 +91,10 @@ class MeshDiscoveryManager(
                 isDiscovering = false
                 onDiscoveryStateChanged(false)
                 logger.warn("discovery_failed", mapOf("reason" to reason))
+                if (registered) {
+                    peerRefreshHandler.removeCallbacks(discoveryRetry)
+                    peerRefreshHandler.postDelayed(discoveryRetry, DISCOVERY_RETRY_DELAY_MS)
+                }
             }
         })
     }
@@ -119,5 +142,10 @@ class MeshDiscoveryManager(
         Context.RECEIVER_NOT_EXPORTED
     } else {
         0
+    }
+
+    private companion object {
+        const val PEER_REFRESH_INTERVAL_MS = 5_000L
+        const val DISCOVERY_RETRY_DELAY_MS = 5_000L
     }
 }

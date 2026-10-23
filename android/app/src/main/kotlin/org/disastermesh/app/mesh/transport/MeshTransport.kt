@@ -51,10 +51,13 @@ class MeshTransport(
 
     @Synchronized
     fun start(isGroupOwner: Boolean, groupOwnerAddress: String?) {
-        if (activeGroupOwner != isGroupOwner || activeAddress != groupOwnerAddress) {
+        // The group owner never dials an address. Ignore platform address changes
+        // on that side so repeated connection-info callbacks cannot restart its listener.
+        val transportAddress = if (isGroupOwner) null else groupOwnerAddress?.trim()
+        if (activeGroupOwner != isGroupOwner || activeAddress != transportAddress) {
             stopLocked()
             activeGroupOwner = isGroupOwner
-            activeAddress = groupOwnerAddress
+            activeAddress = transportAddress
         }
         val currentGeneration = generation
         if (isGroupOwner) {
@@ -65,7 +68,9 @@ class MeshTransport(
                 executor.execute { listen(currentGeneration) }
             }
         } else if (!groupOwnerAddress.isNullOrBlank()) {
-            if (connectLoopGeneration != currentGeneration) {
+            if (connectLoopGeneration != currentGeneration &&
+                links.none { it.generation == currentGeneration }
+            ) {
                 connectLoopGeneration = currentGeneration
                 lastError = null
                 emitState("connecting")
@@ -107,7 +112,10 @@ class MeshTransport(
 
     private fun listen(expectedGeneration: Int) {
         try {
-            val server = ServerSocket(PORT)
+            val server = ServerSocket().apply {
+                reuseAddress = true
+                bind(InetSocketAddress(PORT))
+            }
             synchronized(this) {
                 if (generation != expectedGeneration || activeGroupOwner != true) {
                     server.close()
@@ -128,6 +136,7 @@ class MeshTransport(
                 val reason = error.message ?: error.javaClass.simpleName
                 logger.warn("mesh_listener_failed", mapOf("error" to reason))
                 emitState("failed", reason)
+                scheduleListenerRestart(expectedGeneration)
             }
         }
     }
@@ -138,15 +147,20 @@ class MeshTransport(
             if (generation != expectedGeneration) return
             if (delayMs > 0) Thread.sleep(delayMs)
             if (generation != expectedGeneration) return
+            var socketToClose: Socket? = null
             try {
                 val socket = Socket()
+                socketToClose = socket
                 socket.connect(InetSocketAddress(address, PORT), CONNECT_TIMEOUT_MS)
                 if (generation != expectedGeneration) {
                     socket.close()
                     return
                 }
                 if (attach(socket, expectedGeneration)) return
+                socketToClose = null
             } catch (error: Exception) {
+                try { socketToClose?.close() } catch (_: Exception) {}
+                socketToClose = null
                 lastConnectError = error.message ?: error.javaClass.simpleName
                 logger.warn(
                     "mesh_socket_connect_failed",
@@ -159,10 +173,12 @@ class MeshTransport(
                 if (generation == expectedGeneration) connectLoopGeneration = null
             }
             emitState("failed", lastConnectError)
+            scheduleClientReconnect(expectedGeneration)
         }
     }
 
     private fun attach(socket: Socket, expectedGeneration: Int): Boolean {
+        var attachedLink: Link? = null
         try {
             val link = Link(
                 socket = socket,
@@ -176,6 +192,7 @@ class MeshTransport(
                     return false
                 }
                 links += link
+                attachedLink = link
             }
             socket.soTimeout = HELLO_TIMEOUT_MS
             if (!write(link, JSONObject()
@@ -189,7 +206,8 @@ class MeshTransport(
             return true
         } catch (error: Exception) {
             logger.warn("mesh_socket_attach_failed", mapOf("error" to (error.message ?: "unknown")))
-            try { socket.close() } catch (_: Exception) {}
+            val link = attachedLink
+            if (link != null) removeLink(link) else try { socket.close() } catch (_: Exception) {}
             return false
         }
     }
@@ -240,7 +258,9 @@ class MeshTransport(
         }
         link.socket.soTimeout = 0
         mainHandler.post {
-            if (generation == link.generation) {
+            if (generation == link.generation && links.contains(link) &&
+                identifiedPeerId == nodeId
+            ) {
                 onPeerIdentified(nodeId)
                 onStateChanged("connected", null)
             }
@@ -271,25 +291,86 @@ class MeshTransport(
     }
 
     private fun removeLink(link: Link) {
-        if (!links.remove(link)) return
+        val (wasIdentifiedPeer, shouldReconnect, hasPendingLink) = synchronized(this) {
+            if (!links.remove(link)) return
+            val peerId = link.peerNodeId
+            val wasIdentifiedPeer = peerId != null && identifiedPeerId == peerId &&
+                links.none { it.peerNodeId == peerId }
+            if (wasIdentifiedPeer) identifiedPeerId = null
+
+            val shouldReconnect = activeGroupOwner == false && generation == link.generation &&
+                links.none { it.generation == link.generation }
+            if (shouldReconnect) connectLoopGeneration = null
+            Triple(wasIdentifiedPeer, shouldReconnect, links.any { it.generation == generation })
+        }
         try { link.socket.close() } catch (_: Exception) {}
-        if (activeGroupOwner == false && generation == link.generation) {
-            synchronized(this) {
-                if (generation == link.generation) connectLoopGeneration = null
+        if (shouldReconnect) scheduleClientReconnect(link.generation)
+        if (wasIdentifiedPeer) {
+            mainHandler.post {
+                if (generation == link.generation && identifiedPeerId == null) {
+                    onPeerIdentified(null)
+                }
             }
         }
-        val wasIdentifiedPeer = identifiedPeerId == link.peerNodeId
-        if (wasIdentifiedPeer) {
-            identifiedPeerId = null
-            mainHandler.post { onPeerIdentified(null) }
+        if (links.none { it.peerNodeId != null }) {
+            emitState(if (hasPendingLink) "connecting" else "disconnected")
         }
-        if (links.none { it.peerNodeId != null }) emitState("disconnected")
+    }
+
+    /** Restarts the client loop after a failed handshake, socket close, or exhausted retry batch. */
+    private fun scheduleClientReconnect(expectedGeneration: Int) {
+        executor.execute {
+            try {
+                Thread.sleep(RECONNECT_DELAY_MS)
+            } catch (_: InterruptedException) {
+                return@execute
+            }
+            synchronized(this) {
+                val address = activeAddress
+                if (generation != expectedGeneration || activeGroupOwner != false ||
+                    address.isNullOrBlank() || connectLoopGeneration == expectedGeneration ||
+                    links.any { it.generation == expectedGeneration }
+                ) return@synchronized
+                connectLoopGeneration = expectedGeneration
+                lastError = null
+                emitState("connecting")
+                executor.execute { connectWithRetry(address, expectedGeneration) }
+            }
+        }
+    }
+
+    private fun scheduleListenerRestart(expectedGeneration: Int) {
+        executor.execute {
+            try {
+                Thread.sleep(RECONNECT_DELAY_MS)
+            } catch (_: InterruptedException) {
+                return@execute
+            }
+            synchronized(this) {
+                if (generation != expectedGeneration || activeGroupOwner != true ||
+                    listenerLoopGeneration == expectedGeneration
+                ) return@synchronized
+                listenerLoopGeneration = expectedGeneration
+                lastError = null
+                emitState("connecting")
+                executor.execute { listen(expectedGeneration) }
+            }
+        }
     }
 
     private fun emitState(state: String, error: String? = null) {
-        currentState = state
-        if (state == "failed") lastError = error
-        mainHandler.post { onStateChanged(state, error) }
+        val stateGeneration: Int
+        synchronized(this) {
+            if (state != "connected" && links.any { it.peerNodeId != null }) return
+            currentState = state
+            if (state == "failed") lastError = error
+            stateGeneration = generation
+        }
+        mainHandler.post {
+            if (generation == stateGeneration && currentState == state) {
+                onStateChanged(state, error)
+            }
+        }
     }
 
     private fun isNodeId(value: String): Boolean = try {
@@ -309,7 +390,8 @@ class MeshTransport(
     private companion object {
         const val PORT = 8988
         const val CONNECT_TIMEOUT_MS = 5_000
-        const val HELLO_TIMEOUT_MS = 10_000
+        const val HELLO_TIMEOUT_MS = 5_000
+        const val RECONNECT_DELAY_MS = 1_000L
         const val PROTOCOL_VERSION = 1
         val RETRY_DELAYS_MS = listOf(0L, 1_000L, 2_000L, 4_000L, 8_000L)
     }

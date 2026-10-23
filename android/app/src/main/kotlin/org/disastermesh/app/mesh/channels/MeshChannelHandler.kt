@@ -124,6 +124,7 @@ class MeshChannelHandler(
                 metricsHandler.removeCallbacksAndMessages(null)
                 routeCoordinator.noRoute("mesh_stopped")
                 discovery.stop()
+                connection.disconnect()
                 context.stopService(Intent(context, MeshForegroundService::class.java))
                 logger.info("mesh_stopped")
                 emit("MeshStatusChanged", mapOf("running" to false, "discovering" to false, "state" to "stopped"))
@@ -313,6 +314,7 @@ class MeshChannelHandler(
         }
         running = true
         discovery.start()
+        connection.refreshConnectionInfo()
         schedulePendingExpiries()
         metricsHandler.removeCallbacksAndMessages(null)
         metricsHandler.post(metricsRunnable)

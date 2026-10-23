@@ -21,6 +21,8 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
   final _observedMessageStatuses = <String, String>{};
   final _random = Random(7);
   bool _disposed = false;
+  int _nativeRefreshRequest = 0;
+  int _connectionEventRevision = 0;
 
   @override
   MeshDashboardState build() {
@@ -90,12 +92,16 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
   }
 
   Future<void> refreshNativeState() async {
+    final refreshRequest = ++_nativeRefreshRequest;
+    final connectionRevision = _connectionEventRevision;
     try {
       final channel = ref.read(meshChannelProvider);
       final peers = await channel.getPeers();
       final messages = await channel.getMessages();
       final connection = await channel.getConnectionInfo();
-      if (_disposed) return;
+      if (_disposed || refreshRequest != _nativeRefreshRequest) return;
+      final connectionSnapshotIsCurrent =
+          connectionRevision == _connectionEventRevision;
       final nativeAddress = connection['peerId'] as String? ?? '';
       final nodeId = connection['peerNodeId'] as String? ?? '';
       final transportState =
@@ -108,7 +114,9 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
       final connected = connection['isConnected'] == true ||
           transportState == 'connected' && nodeId.isNotEmpty;
       final peerNodeIds = Map<String, String>.from(state.peerNodeIds);
-      if (address.isNotEmpty && nodeId.isNotEmpty) {
+      if (connectionSnapshotIsCurrent &&
+          address.isNotEmpty &&
+          nodeId.isNotEmpty) {
         peerNodeIds[address] = nodeId;
       }
       final restoredById = <String, MeshChatMessage>{};
@@ -124,28 +132,37 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
           peerId: peerId,
           text: message['payload']?.toString() ?? '',
           incoming: incoming,
-          status: _observedMessageStatuses[id] ??
-              (incoming
-                  ? 'received'
-                  : message['status']?.toString() ?? 'queued'),
+          status: incoming
+              ? 'received'
+              : message['status']?.toString() ??
+                  _observedMessageStatuses[id] ??
+                  'queued',
         );
       }
       for (final existing in state.chatMessages) {
-        restoredById[existing.id] = existing;
+        restoredById.putIfAbsent(existing.id, () => existing);
       }
       state = state.copyWith(
         nativePeers: peers,
         chatMessages: restoredById.values.toList(growable: false),
-        connectionState: connected
-            ? 'connected'
-            : address.isNotEmpty
-                ? 'connecting'
-                : 'disconnected',
-        connectionPeerAddress: address,
-        connectionPeerNodeId: nodeId,
-        transportState: transportState,
-        transportError:
-            connection['transportError'] as String? ?? state.transportError,
+        connectionState: connectionSnapshotIsCurrent
+            ? connected
+                ? 'connected'
+                : address.isNotEmpty
+                    ? 'connecting'
+                    : 'disconnected'
+            : state.connectionState,
+        connectionPeerAddress: connectionSnapshotIsCurrent
+            ? address
+            : state.connectionPeerAddress,
+        connectionPeerNodeId: connectionSnapshotIsCurrent
+            ? nodeId
+            : state.connectionPeerNodeId,
+        transportState:
+            connectionSnapshotIsCurrent ? transportState : state.transportState,
+        transportError: connectionSnapshotIsCurrent
+            ? connection['transportError'] as String? ?? state.transportError
+            : state.transportError,
         peerNodeIds: peerNodeIds,
       );
     } catch (_) {
@@ -190,6 +207,11 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
 
   void _handleNativeEvent(Map<String, dynamic> event) {
     final payload = Map<String, dynamic>.from(event['payload'] as Map? ?? {});
+    if (event['type'] == 'TransportChanged' ||
+        event['type'] == 'ConnectionChanged' ||
+        event['type'] == 'PeerIdentityChanged') {
+      _connectionEventRevision++;
+    }
     if (event['type'] == 'MeshStatusChanged') {
       state = state.copyWith(
         isActive: payload['running'] as bool? ?? state.isActive,
