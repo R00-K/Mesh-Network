@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/auth/login_screen.dart';
 import '../../features/dashboard/dashboard_screen.dart';
 import '../../features/emergency/emergency_screen.dart';
 import '../../features/mesh/mesh_screen.dart';
@@ -11,12 +10,11 @@ import '../../features/settings/settings_screen.dart';
 /// Application navigation configuration.
 final appRouter = createAppRouter();
 
-/// Creates a router with the correct startup destination for the auth gate.
-GoRouter createAppRouter({String initialLocation = '/login'}) {
+/// Creates the app router, opening directly on the dashboard.
+GoRouter createAppRouter({String initialLocation = '/'}) {
   return GoRouter(
   initialLocation: initialLocation,
   routes: [
-    GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
     ShellRoute(
       builder: (context, state, child) => _AppShell(child: child),
       routes: [

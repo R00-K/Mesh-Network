@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../infra/api/mesh_dashboard_controller.dart';
-import '../../infra/services/auth_state.dart';
 import '../../infra/services/theme_controller.dart';
 
 /// Mesh routing and developer settings.
@@ -15,24 +13,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  bool _signingOut = false;
-
-  Future<void> _signOut() async {
-    setState(() => _signingOut = true);
-    try {
-      await ref.read(authControllerProvider.notifier).signOut();
-      if (mounted) context.go('/login');
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not log out: $error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _signingOut = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(meshDashboardProvider);
@@ -103,22 +83,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ),
         const Card(child: SwitchListTile(value: true, onChanged: null, title: Text('Developer logs'), subtitle: Text('Native discovery and routing events'))),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.logout),
-            title: const Text('Log out'),
-            subtitle: const Text('Sign out of this account'),
-            trailing: _signingOut
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
-            onTap: _signingOut ? null : _signOut,
-          ),
-        ),
       ],
     );
   }
