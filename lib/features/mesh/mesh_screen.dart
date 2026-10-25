@@ -71,13 +71,14 @@ class MeshScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 10),
-        const Text('Nearby Wi-Fi Direct devices',
+        const Text('Discovered Wi-Fi Direct devices',
             style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
         if (state.nativePeers.isEmpty)
           const Card(child: ListTile(title: Text('No real peers discovered')))
         else
           ...state.nativePeers.map((peer) {
+            final peerAge = DateTime.now().difference(peer.lastSeen);
             final isCurrentPeer = state.connectionPeerAddress == peer.id;
             final transportReady = isCurrentPeer &&
                 state.transportState == 'connected' &&
@@ -105,13 +106,24 @@ class MeshScreen extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Wi-Fi Direct address: ${peer.id}'),
+                    if (peerAge.inSeconds >= 5)
+                      Text('Last seen ${peerAge.inSeconds}s ago', softWrap: true),
                     if (transportReady)
                       Text('Node ID: ${state.connectionPeerNodeId}')
                     else if (isConnecting)
-                      Text(state.transportError.isEmpty
-                          ? 'Verifying peer identity…'
-                          : 'Retrying connection: ${state.transportError}')
-                    else if (isCurrentPeer &&
+                      Text(
+                        state.transportError.isNotEmpty
+                            ? 'Retrying connection: ${state.transportError}'
+                            : state.connectionState == 'connecting' &&
+                                    state.transportState == 'disconnected'
+                                ? 'Waiting for Wi-Fi Direct negotiation. Accept the system connection request on the other phone if prompted.'
+                                : state.transportState == 'listening'
+                                    ? 'Waiting for the peer messaging connection and identity check…'
+                                    : state.transportState == 'connecting'
+                                        ? 'Connecting the messaging transport…'
+                                        : 'Verifying peer identity…',
+                        softWrap: true,
+                      )                    else if (isCurrentPeer &&
                         state.connectionState == 'connected' &&
                         state.transportState == 'failed')
                       Text(
@@ -127,41 +139,43 @@ class MeshScreen extends ConsumerWidget {
                       Text(state.transportError.isEmpty
                           ? 'Connection failed. Try again.'
                           : state.transportError),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: [
+                        if (transportReady)
+                          TextButton(
+                            onPressed: () => context.go(
+                              '/messages?destination=${Uri.encodeComponent(peer.id)}',
+                            ),
+                            child: const Text('Message'),
+                          )
+                        else if (isConnecting)
+                          const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else
+                          TextButton(
+                            onPressed: () => _connect(context, ref, peer.id),
+                            child: const Text('Connect'),
+                          ),
+                        if (isCurrentPeer &&
+                            state.connectionState != 'disconnected')
+                          TextButton(
+                            onPressed: () => _disconnect(context, ref),
+                            child: const Text('Disconnect'),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
                 isThreeLine: transportReady || isConnecting,
-                trailing: Wrap(
-                  spacing: 4,
-                  children: [
-                    if (transportReady)
-                      TextButton(
-                        onPressed: () => context.go(
-                          '/messages?destination=${Uri.encodeComponent(peer.id)}',
-                        ),
-                        child: const Text('Message'),
-                      )
-                    else if (isConnecting)
-                      const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else
-                      TextButton(
-                        onPressed: () => _connect(context, ref, peer.id),
-                        child: const Text('Connect'),
-                      ),
-                    if (isCurrentPeer &&
-                        state.connectionState != 'disconnected')
-                      TextButton(
-                        onPressed: () => _disconnect(context, ref),
-                        child: const Text('Disconnect'),
-                      ),
-                  ],
-                ),
               ),
             );
           }),

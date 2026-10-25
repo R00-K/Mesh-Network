@@ -13,6 +13,7 @@ import android.os.Looper
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import org.disastermesh.core.discovery.PeerSnapshotCache
 import org.disastermesh.core.logging.MeshLogger
 
 /** Owns WifiP2pManager discovery and exposes the live peer cache as a Flow. */
@@ -24,13 +25,17 @@ class MeshDiscoveryManager(
     private val onPeersChanged: () -> Unit = {},
     private val onConnectionChanged: () -> Unit = {},
     private val onLocalDeviceIdChanged: (String) -> Unit = {},
+    private val retainedPeerId: () -> String? = { null },
 ) {
     private val manager = context.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
     private val channel = manager.initialize(context, Looper.getMainLooper(), null)
     private val peerRefreshHandler = Handler(Looper.getMainLooper())
     private val _peers = MutableStateFlow<List<WifiP2pDevice>>(emptyList())
+    private val peerCache = PeerSnapshotCache<WifiP2pDevice>(PEER_CACHE_TTL_MS)
     private val receiver = MeshBroadcastReceiver(this, logger, onConnectionChanged)
     private var registered = false
+    private var discoveryGeneration = 0
+    private var discoveryStartPending = false
     private val peerRefresh = object : Runnable {
         override fun run() {
             if (!registered) return
@@ -63,6 +68,8 @@ class MeshDiscoveryManager(
 
     /** Stops discovery and unregisters platform callbacks. */
     fun stop() {
+        discoveryGeneration += 1
+        discoveryStartPending = false
         peerRefreshHandler.removeCallbacksAndMessages(null)
         if (registered) {
             context.unregisterReceiver(receiver)
@@ -71,12 +78,21 @@ class MeshDiscoveryManager(
         manager.stopPeerDiscovery(channel, null)
         isDiscovering = false
         onDiscoveryStateChanged(false)
+        peerCache.clear()
         _peers.value = emptyList()
     }
 
     /** Requests a new Wi-Fi Direct peer scan. */
-    fun discover() {
+    fun discover(force: Boolean = false) {
         peerRefreshHandler.removeCallbacks(discoveryRetry)
+        if (discoveryStartPending) {
+            requestPeers()
+            return
+        }
+        if (isDiscovering && !force) {
+            requestPeers()
+            return
+        }
         if (!hasDiscoveryPermission()) {
             logger.warn("discovery_permission_missing")
             onDiscoveryError("Allow Nearby Wi-Fi (Android 13+) or Location (older Android) permission to discover peers.")
@@ -87,9 +103,36 @@ class MeshDiscoveryManager(
             return
         }
         onDiscoveryError("")
+        val expectedGeneration = ++discoveryGeneration
+        discoveryStartPending = true
+        if (force && isDiscovering) {
+            try {
+                manager.stopPeerDiscovery(channel, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() = startPlatformDiscovery(expectedGeneration)
+
+                    override fun onFailure(reason: Int) {
+                        if (expectedGeneration != discoveryGeneration || !registered) return
+                        logger.debug("discovery_scan_stop_completed_with_error", mapOf("reason" to reason))
+                        startPlatformDiscovery(expectedGeneration)
+                    }
+                })
+            } catch (error: SecurityException) {
+                discoveryStartPending = false
+                logger.warn("discovery_scan_restart_denied", mapOf("error" to (error.message ?: "permission denied")))
+                onDiscoveryError("Android denied the Wi-Fi Direct scan. Check Nearby Wi-Fi permission and Location services.")
+            }
+        } else {
+            startPlatformDiscovery(expectedGeneration)
+        }
+    }
+
+    private fun startPlatformDiscovery(expectedGeneration: Int) {
+        if (expectedGeneration != discoveryGeneration || !registered) return
         try {
             manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
+                if (expectedGeneration != discoveryGeneration || !registered) return
+                discoveryStartPending = false
                 isDiscovering = true
                 peerRefreshHandler.removeCallbacks(discoveryRetry)
                 onDiscoveryStateChanged(true)
@@ -97,6 +140,8 @@ class MeshDiscoveryManager(
             }
 
             override fun onFailure(reason: Int) {
+                if (expectedGeneration != discoveryGeneration || !registered) return
+                discoveryStartPending = false
                 isDiscovering = false
                 onDiscoveryStateChanged(false)
                 logger.warn("discovery_failed", mapOf("reason" to reason))
@@ -108,6 +153,8 @@ class MeshDiscoveryManager(
             }
             })
         } catch (error: SecurityException) {
+            if (expectedGeneration != discoveryGeneration) return
+            discoveryStartPending = false
             isDiscovering = false
             onDiscoveryStateChanged(false)
             logger.warn("discovery_security_exception", mapOf("error" to (error.message ?: "permission denied")))
@@ -134,10 +181,24 @@ class MeshDiscoveryManager(
     }
 
     internal fun updatePeers(devices: Collection<WifiP2pDevice>) {
-        _peers.value = devices.sortedBy { it.deviceName.lowercase() }
+        val now = System.currentTimeMillis()
+        val retained = setOfNotNull(retainedPeerId())
+        val snapshots = peerCache.update(
+            peers = devices.map { it.deviceAddress to it },
+            nowMs = now,
+            retainedIds = retained,
+        )
+        _peers.value = snapshots
+            .map { it.value }
+            .sortedBy { it.deviceName.lowercase() }
         onPeersChanged()
-        logger.debug("peers_updated", mapOf("count" to devices.size))
+        logger.debug("peers_updated", mapOf("count" to _peers.value.size, "freshCount" to devices.size))
     }
+
+    fun lastSeenAt(deviceAddress: String): Long? = peerCache.lastSeenAt(deviceAddress)
+
+    fun isRecentlySeen(deviceAddress: String): Boolean =
+        peerCache.isFresh(deviceAddress, System.currentTimeMillis(), PEER_FRESHNESS_MS)
 
     private fun hasDiscoveryPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= 33) {
@@ -179,5 +240,7 @@ class MeshDiscoveryManager(
     private companion object {
         const val PEER_REFRESH_INTERVAL_MS = 5_000L
         const val DISCOVERY_RETRY_DELAY_MS = 5_000L
+        const val PEER_CACHE_TTL_MS = 5 * 60_000L
+        const val PEER_FRESHNESS_MS = 15_000L
     }
 }

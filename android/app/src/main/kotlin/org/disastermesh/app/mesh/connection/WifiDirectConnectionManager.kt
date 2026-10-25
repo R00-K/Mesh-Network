@@ -34,6 +34,7 @@ class WifiDirectConnectionManager(
     var isConnected: Boolean = false
         private set
     @Volatile private var operationGeneration = 0
+    private var connectingPeerId: String? = null
 
     private val confirmDisconnect = Runnable {
         val expectedGeneration = disconnectCheckGeneration
@@ -65,7 +66,17 @@ class WifiDirectConnectionManager(
             refreshConnectionInfo()
             return
         }
+        if (connectingPeerId == peerId) {
+            logger.debug("wifi_direct_duplicate_connect_ignored", mapOf("peerId" to peerId))
+            return
+        }
+        if (connectingPeerId != null) {
+            logger.warn("wifi_direct_connect_in_progress", mapOf("peerId" to connectingPeerId))
+            return
+        }
         val expectedOperation = ++operationGeneration
+        connectingPeerId = peerId
+        logger.info("wifi_direct_connect_attempt", mapOf("attemptId" to expectedOperation, "peerId" to peerId))
         handler.removeCallbacks(confirmDisconnect)
         connectionTimeout?.let(handler::removeCallbacks)
         disconnectCheckGeneration += 1
@@ -122,11 +133,32 @@ class WifiDirectConnectionManager(
 
             override fun onFailure(reason: Int) {
                 if (expectedOperation != operationGeneration) return
-                logger.warn("wifi_direct_connect_failed", mapOf("peerId" to peerId, "reason" to reason))
+                val reasonName = when (reason) {
+                    WifiP2pManager.ERROR -> "ERROR"
+                    WifiP2pManager.P2P_UNSUPPORTED -> "P2P_UNSUPPORTED"
+                    WifiP2pManager.BUSY -> "BUSY"
+                    else -> "UNKNOWN"
+                }
+                logger.warn(
+                    "wifi_direct_connect_failed",
+                    mapOf(
+                        "attemptId" to expectedOperation,
+                        "peerId" to peerId,
+                        "reasonCode" to reason,
+                        "reason" to reasonName,
+                        "p2pConnected" to isConnected,
+                    ),
+                )
+                val message = when (reason) {
+                    WifiP2pManager.ERROR -> "Android's Wi-Fi Direct service rejected the request (ERROR 0). Refresh peer discovery, keep Wi-Fi and Location services on, make sure no other Wi-Fi Direct group is active, and retry from one phone while the other is ready to accept."
+                    WifiP2pManager.BUSY -> "Android's Wi-Fi Direct service is busy. Wait for the current scan or connection operation to finish, then retry."
+                    WifiP2pManager.P2P_UNSUPPORTED -> "This device does not support Wi-Fi Direct."
+                    else -> "Android rejected the Wi-Fi Direct request ($reasonName $reason). Refresh discovery and try again."
+                }
                 clearConnection(
                     "failed",
                     preservePeerId = peerId,
-                    error = "Android rejected the Wi-Fi Direct connection request (reason $reason).",
+                    error = message,
                 )
             }
         })
@@ -136,13 +168,14 @@ class WifiDirectConnectionManager(
         if (!hasPermission()) return
         val expectedOperation = operationGeneration
         manager.requestConnectionInfo(channel) { info ->
-            if (expectedOperation == operationGeneration) updateConnectionInfo(info)
+            if (expectedOperation == operationGeneration) updateConnectionInfo(info, expectedOperation)
         }
     }
 
     fun disconnect() {
         if (!hasPermission()) return
         val expectedOperation = ++operationGeneration
+        connectingPeerId = null
         handler.removeCallbacks(confirmDisconnect)
         connectionTimeout?.let(handler::removeCallbacks)
         disconnectCheckGeneration += 1
@@ -159,7 +192,7 @@ class WifiDirectConnectionManager(
         })
     }
 
-    private fun updateConnectionInfo(info: WifiP2pInfo) {
+    private fun updateConnectionInfo(info: WifiP2pInfo, attemptId: Int = operationGeneration) {
         if (!info.groupFormed) {
             // Android can briefly report no formed group while updating P2P info.
             // Confirm loss before closing a working TCP transport.
@@ -176,13 +209,16 @@ class WifiDirectConnectionManager(
         connectionTimeout = null
         handler.removeCallbacks(confirmDisconnect)
         disconnectCheckGeneration += 1
+        val changed = !isConnected || isGroupOwner != info.isGroupOwner ||
+            groupOwnerAddress != info.groupOwnerAddress?.hostAddress
         isGroupOwner = info.isGroupOwner
         groupOwnerAddress = info.groupOwnerAddress?.hostAddress
         isConnected = true
-        onStateChanged("connected", connectedPeerId, null)
+        connectingPeerId = null
+        if (changed) onStateChanged("connected", connectedPeerId, null)
         logger.info(
             "wifi_direct_connected",
-            mapOf("groupOwner" to isGroupOwner, "groupOwnerAddress" to groupOwnerAddress),
+            mapOf("attemptId" to attemptId, "groupOwner" to isGroupOwner, "groupOwnerAddress" to groupOwnerAddress),
         )
     }
 
@@ -197,6 +233,7 @@ class WifiDirectConnectionManager(
         handler.removeCallbacks(confirmDisconnect)
         disconnectCheckGeneration += 1
         if (invalidateOperation) operationGeneration += 1
+        connectingPeerId = null
         connectedPeerId = preservePeerId
         groupOwnerAddress = null
         isGroupOwner = false

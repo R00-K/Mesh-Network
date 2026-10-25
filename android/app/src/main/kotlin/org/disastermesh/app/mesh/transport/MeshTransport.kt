@@ -1,5 +1,8 @@
 package org.disastermesh.app.mesh.transport
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Handler
 import android.os.Looper
 import java.io.BufferedReader
@@ -7,23 +10,29 @@ import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
+import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.UUID
+import java.util.concurrent.ThreadLocalRandom
 import org.disastermesh.core.logging.MeshLogger
 import org.json.JSONObject
 
 /** TCP transport used after a Wi-Fi Direct group has formed. */
 class MeshTransport(
+    context: Context,
     private val localNodeId: String,
     private val logger: MeshLogger,
     private val onStateChanged: (String, String?) -> Unit,
     private val onPeerIdentified: (String?) -> Unit,
     private val onEnvelopeReceived: (JSONObject) -> Unit,
 ) {
+    private val connectivityManager =
+        context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val executor: ExecutorService = Executors.newCachedThreadPool()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val links = CopyOnWriteArrayList<Link>()
@@ -32,10 +41,13 @@ class MeshTransport(
     @Volatile private var activeAddress: String? = null
     @Volatile private var generation = 0
     @Volatile private var connectLoopGeneration: Int? = null
+    @Volatile private var reconnectTaskGeneration: Int? = null
+    @Volatile private var clientReconnectAttempt = 0
     @Volatile private var listenerLoopGeneration: Int? = null
     @Volatile private var identifiedPeerId: String? = null
     @Volatile private var currentState: String = "disconnected"
     @Volatile private var lastError: String? = null
+    @Volatile private var routeDiagnosticGeneration = -1
 
     val connectedLinkCount: Int
         get() = links.count { it.peerNodeId != null }
@@ -64,6 +76,7 @@ class MeshTransport(
             if (serverSocket == null && listenerLoopGeneration != currentGeneration) {
                 listenerLoopGeneration = currentGeneration
                 lastError = null
+                logger.info("mesh_server_start_requested", mapOf("generation" to currentGeneration, "port" to PORT))
                 emitState("connecting")
                 executor.execute { listen(currentGeneration) }
             }
@@ -73,6 +86,10 @@ class MeshTransport(
             ) {
                 connectLoopGeneration = currentGeneration
                 lastError = null
+                logger.info(
+                    "mesh_client_start_requested",
+                    mapOf("generation" to currentGeneration, "groupOwnerAddress" to groupOwnerAddress),
+                )
                 emitState("connecting")
                 executor.execute { connectWithRetry(groupOwnerAddress, currentGeneration) }
             }
@@ -94,6 +111,8 @@ class MeshTransport(
     private fun stopLocked() {
         generation += 1
         connectLoopGeneration = null
+        reconnectTaskGeneration = null
+        clientReconnectAttempt = 0
         listenerLoopGeneration = null
         activeGroupOwner = null
         activeAddress = null
@@ -123,9 +142,19 @@ class MeshTransport(
                 }
                 serverSocket = server
             }
+            logger.info("mesh_listener_started", mapOf("port" to PORT, "generation" to expectedGeneration))
             emitState("listening")
             while (!server.isClosed && generation == expectedGeneration) {
-                attach(server.accept(), expectedGeneration)
+                val accepted = server.accept()
+                logger.info(
+                    "mesh_socket_accepted",
+                    mapOf(
+                        "generation" to expectedGeneration,
+                        "remoteAddress" to accepted.inetAddress.hostAddress,
+                        "localAddress" to accepted.localAddress.hostAddress,
+                    ),
+                )
+                attach(accepted, expectedGeneration)
             }
         } catch (error: Exception) {
             if (generation == expectedGeneration) {
@@ -149,13 +178,26 @@ class MeshTransport(
             if (generation != expectedGeneration) return
             var socketToClose: Socket? = null
             try {
-                val socket = Socket()
+                val selection = findNetworkFor(address, expectedGeneration)
+                    ?: throw IOException("No Android Wi-Fi Direct network route to group owner $address")
+                val network = selection.network
+                val socket = network.socketFactory.createSocket()
                 socketToClose = socket
                 socket.connect(InetSocketAddress(address, PORT), CONNECT_TIMEOUT_MS)
                 if (generation != expectedGeneration) {
                     socket.close()
                     return
                 }
+                logger.info(
+                    "mesh_socket_connected",
+                    mapOf(
+                        "generation" to expectedGeneration,
+                        "groupOwnerAddress" to address,
+                        "localAddress" to socket.localAddress.hostAddress,
+                        "networkInterface" to selection.interfaceName,
+                        "route" to selection.route,
+                    ),
+                )
                 if (attach(socket, expectedGeneration)) return
                 socketToClose = null
             } catch (error: Exception) {
@@ -164,7 +206,13 @@ class MeshTransport(
                 lastConnectError = error.message ?: error.javaClass.simpleName
                 logger.warn(
                     "mesh_socket_connect_failed",
-                    mapOf("attempt" to index + 1, "error" to (error.message ?: "unknown")),
+                    mapOf(
+                        "attempt" to index + 1,
+                        "generation" to expectedGeneration,
+                        "groupOwnerAddress" to address,
+                        "exceptionType" to error.javaClass.simpleName,
+                        "error" to (error.message ?: "no detail"),
+                    ),
                 )
             }
         }
@@ -227,13 +275,20 @@ class MeshTransport(
                 }
             }
         } catch (error: Exception) {
-            if (generation == link.generation) {
+            if (generation == link.generation && !link.socket.isClosed) {
                 if (link.peerNodeId == null) {
                     val reason = error.message ?: error.javaClass.simpleName
                     lastError = reason
                     emitState("failed", reason)
                 }
-                logger.warn("mesh_socket_read_failed", mapOf("error" to (error.message ?: "unknown")))
+                logger.warn(
+                    "mesh_socket_read_failed",
+                    mapOf(
+                        "generation" to link.generation,
+                        "exceptionType" to error.javaClass.simpleName,
+                        "error" to (error.message ?: "no detail"),
+                    ),
+                )
             }
         } finally {
             removeLink(link)
@@ -262,8 +317,22 @@ class MeshTransport(
             link.peerNodeId = nodeId
             identifiedPeerId = nodeId
             currentState = "connected"
+            reconnectTaskGeneration = null
         }
+        logger.info(
+            "mesh_peer_identity_verified",
+            mapOf("generation" to link.generation, "peerNodeId" to nodeId),
+        )
         link.socket.soTimeout = 0
+        mainHandler.postDelayed({
+            synchronized(this) {
+                if (generation == link.generation && links.contains(link) &&
+                    identifiedPeerId == nodeId
+                ) {
+                    clientReconnectAttempt = 0
+                }
+            }
+        }, STABLE_CONNECTION_RESET_MS)
         mainHandler.post {
             if (generation == link.generation && links.contains(link) &&
                 identifiedPeerId == nodeId
@@ -291,7 +360,14 @@ class MeshTransport(
             }
             true
         } catch (error: Exception) {
-            logger.warn("mesh_send_failed", mapOf("error" to (error.message ?: "unknown")))
+            logger.warn(
+                "mesh_send_failed",
+                mapOf(
+                    "generation" to link.generation,
+                    "exceptionType" to error.javaClass.simpleName,
+                    "error" to (error.message ?: "no detail"),
+                ),
+            )
             removeLink(link)
             false
         }
@@ -331,13 +407,37 @@ class MeshTransport(
 
     /** Restarts the client loop after a failed handshake, socket close, or exhausted retry batch. */
     private fun scheduleClientReconnect(expectedGeneration: Int) {
+        val attempt = synchronized(this) {
+            if (generation != expectedGeneration || activeGroupOwner != false ||
+                reconnectTaskGeneration == expectedGeneration ||
+                connectLoopGeneration == expectedGeneration ||
+                links.any { it.generation == expectedGeneration }
+            ) return
+            reconnectTaskGeneration = expectedGeneration
+            clientReconnectAttempt++
+            clientReconnectAttempt - 1
+        }
+        val exponentialDelay = (CLIENT_RECONNECT_BASE_DELAY_MS *
+            (1 shl attempt.coerceAtMost(10)).toLong())
+            .coerceAtMost(CLIENT_RECONNECT_MAX_DELAY_MS)
+        val jitterBound = (exponentialDelay / 4).coerceAtLeast(1L)
+        val delay = (exponentialDelay + ThreadLocalRandom.current().nextLong(jitterBound))
+            .coerceAtMost(CLIENT_RECONNECT_MAX_DELAY_MS)
+        logger.warn(
+            "mesh_client_reconnect_scheduled",
+            mapOf("generation" to expectedGeneration, "attempt" to (attempt + 1), "delayMs" to delay),
+        )
         executor.execute {
             try {
-                Thread.sleep(RECONNECT_DELAY_MS)
+                Thread.sleep(delay)
             } catch (_: InterruptedException) {
+                synchronized(this) {
+                    if (reconnectTaskGeneration == expectedGeneration) reconnectTaskGeneration = null
+                }
                 return@execute
             }
             synchronized(this) {
+                if (reconnectTaskGeneration == expectedGeneration) reconnectTaskGeneration = null
                 val address = activeAddress
                 if (generation != expectedGeneration || activeGroupOwner != false ||
                     address.isNullOrBlank() || connectLoopGeneration == expectedGeneration ||
@@ -390,6 +490,99 @@ class MeshTransport(
         false
     }
 
+    /** Finds the Android network whose specific route reaches the group owner. */
+    private fun findNetworkFor(address: String, expectedGeneration: Int): NetworkSelection? {
+        val destination = try {
+            InetAddress.getByName(address)
+        } catch (_: Exception) {
+            return null
+        }
+        val candidates = connectivityManager.allNetworks
+            .mapNotNull { network ->
+                val properties = connectivityManager.getLinkProperties(network) ?: return@mapNotNull null
+                val matchingRoute = properties.routes
+                    .filter { it.destination.prefixLength > 0 && it.matches(destination) }
+                    .maxByOrNull { it.destination.prefixLength }
+                val matchingAddress = if (matchingRoute == null) {
+                    properties.linkAddresses.firstOrNull { linkAddress ->
+                        sameSubnet(destination, linkAddress.address, linkAddress.prefixLength)
+                    }
+                } else {
+                    null
+                }
+                val prefix = matchingRoute?.destination?.prefixLength
+                    ?: matchingAddress?.prefixLength
+                    ?: return@mapNotNull null
+                NetworkSelection(
+                    network = network,
+                    interfaceName = properties.interfaceName ?: "unknown",
+                    route = matchingRoute?.destination?.toString()
+                        ?: "interface-address/${matchingAddress?.toString()}",
+                    prefixLength = prefix,
+                    localAddresses = properties.linkAddresses.map { it.toString() },
+                )
+            }
+        val selected = candidates.maxByOrNull { it.prefixLength }
+        if (selected == null) {
+            if (routeDiagnosticGeneration != expectedGeneration) {
+                routeDiagnosticGeneration = expectedGeneration
+                val available = connectivityManager.allNetworks.mapNotNull { network ->
+                    connectivityManager.getLinkProperties(network)?.let { properties ->
+                        mapOf(
+                            "interface" to properties.interfaceName,
+                            "addresses" to properties.linkAddresses.map { it.toString() },
+                            "routes" to properties.routes.map { it.destination.toString() },
+                        )
+                    }
+                }
+                logger.error(
+                    "mesh_p2p_route_not_found",
+                    details = mapOf(
+                        "generation" to expectedGeneration,
+                        "destination" to address,
+                        "availableNetworks" to available,
+                    ),
+                )
+            }
+            return null
+        }
+        logger.info(
+            "mesh_p2p_route_selected",
+            mapOf(
+                "generation" to expectedGeneration,
+                "destination" to address,
+                "interface" to selected.interfaceName,
+                "route" to selected.route,
+                "localAddresses" to selected.localAddresses,
+            ),
+        )
+        return selected
+    }
+
+    private fun sameSubnet(first: InetAddress, second: InetAddress, prefixLength: Int): Boolean {
+        val firstBytes = first.address
+        val secondBytes = second.address
+        if (firstBytes.size != secondBytes.size || prefixLength !in 1..(firstBytes.size * 8)) return false
+        var remainingBits = prefixLength
+        for (index in firstBytes.indices) {
+            val bitsHere = remainingBits.coerceIn(0, 8)
+            val mask = if (bitsHere == 0) 0 else (0xff shl (8 - bitsHere)) and 0xff
+            if ((firstBytes[index].toInt() and 0xff and mask) !=
+                (secondBytes[index].toInt() and 0xff and mask)
+            ) return false
+            remainingBits -= bitsHere
+        }
+        return true
+    }
+
+    private data class NetworkSelection(
+        val network: Network,
+        val interfaceName: String,
+        val route: String,
+        val prefixLength: Int,
+        val localAddresses: List<String>,
+    )
+
     private data class Link(
         val socket: Socket,
         val reader: BufferedReader,
@@ -403,6 +596,9 @@ class MeshTransport(
         const val CONNECT_TIMEOUT_MS = 5_000
         const val HELLO_TIMEOUT_MS = 5_000
         const val RECONNECT_DELAY_MS = 1_000L
+        const val CLIENT_RECONNECT_BASE_DELAY_MS = 1_000L
+        const val CLIENT_RECONNECT_MAX_DELAY_MS = 30_000L
+        const val STABLE_CONNECTION_RESET_MS = 15_000L
         const val PROTOCOL_VERSION = 1
         val RETRY_DELAYS_MS = listOf(0L, 1_000L, 2_000L, 4_000L, 8_000L)
     }

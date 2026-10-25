@@ -1,18 +1,20 @@
-# Messaging device test matrix
+# Wi-Fi Direct messaging device test matrix
 
-Status: **not run; requires two physical Android devices with Wi-Fi Direct**. Record device models, Android versions, test date, and observed result for each run.
+Status: **pending physical-device execution**. Use two Android phones with Wi-Fi Direct support. Record manufacturer/model, Android version, build commit, test date, initiator, group-owner role, result, and sanitized logs for each run. Do not include message payloads in shared diagnostics.
 
-| Case | Procedure | Expected result | Result |
+| Case | Procedure | Pass criteria | Result |
 | --- | --- | --- | --- |
-| Both group-owner roles | Repeat connection with each device becoming group owner | TCP identity handshake succeeds in either role; verified UUIDs match the connected devices | Pending |
-| Permission grant | Grant all requested permissions and start discovery | Discovery starts and nearby device is shown | Pending |
-| Permission denial | Deny a requested permission, then attempt start | App reports permission denied; no false running/connected status | Pending |
-| Bidirectional delivery | Send one message A→B and another B→A | Each recipient shows one message; each sender reaches delivered only after acknowledgement | Pending |
-| Duplicate delivery | Interrupt/drop an acknowledgement so sender retries same message ID | Recipient shows one copy and re-acknowledges; sender eventually reaches delivered | Pending |
-| Disconnect and reconnect | Disconnect after queueing a message, then reconnect to the same node | Message remains queued and retries after the intended node reconnects | Pending |
-| Link loss during send | Disable Wi-Fi Direct during a send and restore it | No false delivery; queued/retry state recovers or becomes failed under policy | Pending |
-| Background and resume | Background the app on either side during discovery and messaging, then resume | Connection and persisted message history reconcile; events resume without duplicate display | Pending |
-| Invalid/oversized input | Inject malformed envelope and payload above 8 KiB using a debug harness | Input is rejected, app remains running, no delivery acknowledgement is emitted | Pending |
-| Expiry | Keep a queued message beyond its 24-hour expiry (or use a controlled clock in a test build) | Message becomes failed and is retained in history | Pending |
+| A — Basic connection | Install the same APK on both phones, grant the requested permissions, start discovery, then connect from Phone A. | Peer discovery is separate from connection state; group formation is followed by verified app node IDs and a ready TCP transport on both screens. | Pending |
+| B — Bidirectional messaging | Send a message A→B, wait for acknowledgement, then reply B→A. | Each message appears once at the recipient and the sender shows `delivered` only after the remote app acknowledgement. | Pending |
+| C — Repeated connection events | Keep the connection established while discovery updates arrive and navigate Dashboard, Mesh Nodes, and Messages repeatedly. | The active socket and node identity remain stable; no repeated teardown/recovery and all screens show the same ready state. | Pending |
+| D — Explicit disconnect and reconnect | Disconnect from the app, verify both peers leave the ready state, then reconnect. | The old attempt is closed; stale callbacks do not affect the new attempt; the new transport verifies and messages successfully. | Pending |
+| E — Temporary transport failure | Interrupt Wi-Fi Direct during a send, queue another message, then restore the local link. | Recovery is bounded; no false delivery is shown; the queued message is retried with its original ID and is displayed once. | Pending |
+| F — Cross-device compatibility | Repeat A and B with each phone initiating, and repeat with each phone becoming group owner. Include available OEM and Android-version combinations. | Both roles work for each combination. Record failures by device pair and role rather than generalizing from one pairing. | Pending |
+| G — Offline operation | Disable mobile data and internet access while leaving Wi-Fi/Wi-Fi Direct enabled; repeat A and B. | Discovery, TCP messaging, and acknowledgement work without internet or cloud services. | Pending |
+| H — Lifecycle | During discovery and an established conversation, background and resume the app, lock and unlock the screen, and navigate between screens. | No duplicate service/receiver/socket appears; transport state and persisted history reconcile; events resume without duplicate messages. | Pending |
+| Permission denial and revocation | Deny the applicable nearby/location permission, then grant it; also revoke it while the app is idle and retry. | Actionable permission errors are shown, protected APIs are not called without permission, and retry works after granting. | Pending |
+| Failed identity or protocol | Use a test build or peer harness with a mismatched protocol/invalid hello and wait for the handshake timeout. | The attempt reports a bounded, useful error, closes only its socket, and never presents the peer as ready. | Pending |
+| Duplicate delivery and acknowledgement loss | Use a test harness to drop an acknowledgement so the same message ID is retried. | Receiver displays one copy, acknowledges the duplicate again, and sender resolves to delivered or bounded failed. | Pending |
+| Payload and expiry | Exercise empty and oversized input; use a controlled clock/debug harness for expiry. | Invalid input is rejected; expired messages remain visible as failed and are not silently lost. | Pending |
 
-For each case, retain sanitized logs containing message IDs, lifecycle events, and rejection reasons. Never collect message payloads in diagnostics.
+For a run, install with `adb install -r build/app/outputs/flutter-apk/app-debug.apk` and capture native diagnostics with `adb logcat -v time -s DisasterMesh`. Relevant lifecycle event names include `wifi_direct_connect_attempt`, `wifi_direct_connected`, `mesh_socket_connect_failed`, `mesh_listener_failed`, `mesh_message_enqueued`, `mesh_message_received`, `mesh_message_delivered`, and `mesh_link_recovery_scheduled`.

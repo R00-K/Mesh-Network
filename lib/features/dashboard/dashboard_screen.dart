@@ -85,7 +85,7 @@ class DashboardScreen extends ConsumerWidget {
                     label: 'Device Battery',
                     value: measuredBattery == null
                         ? '—'
-                        : measuredBattery.toString() + '%',
+                        : '$measuredBattery%',
                     icon: Icons.battery_5_bar,
                     color: colors.primary,
                   ),
@@ -121,8 +121,7 @@ class DashboardScreen extends ConsumerWidget {
                                   return;
                                 }
                                 context.go(
-                                  '/messages?destination=' +
-                                      Uri.encodeComponent(node.id),
+                                  '/messages?destination=${Uri.encodeComponent(node.id)}',
                                 );
                               },
                             ),
@@ -233,7 +232,13 @@ class _Panel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [Icon(icon, size: 18, color: colors.primary), const SizedBox(width: 8), Text(title)]),
+            Row(
+              children: [
+                Icon(icon, size: 18, color: colors.primary),
+                const SizedBox(width: 8),
+                Expanded(child: Text(title, softWrap: true)),
+              ],
+            ),
             const Divider(),
             child,
           ],

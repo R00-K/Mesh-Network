@@ -3,24 +3,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('opens on the login screen', (tester) async {
+  testWidgets('opens on the dashboard without layout errors', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(child: DisasterMeshApp()),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Disaster Mesh'), findsOneWidget);
-    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('VitalGuard Mesh'), findsOneWidget);
+    expect(find.text('Connected Nodes'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
-  testWidgets('renders the email and password login form', (tester) async {
+  testWidgets('opens Mesh Nodes from the shared navigation', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(child: DisasterMeshApp()),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Email'), findsOneWidget);
-    expect(find.text('Password'), findsOneWidget);
-    expect(find.text('Sign in'), findsOneWidget);
+    await tester.tap(find.text('Mesh').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mesh Nodes'), findsOneWidget);
+    expect(find.text('Discovered Wi-Fi Direct devices'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

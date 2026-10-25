@@ -11,7 +11,6 @@ import org.disastermesh.app.mesh.connection.WifiDirectConnectionManager
 import org.disastermesh.app.mesh.service.MeshForegroundService
 import org.disastermesh.app.mesh.transport.MeshTransport
 import org.disastermesh.app.mesh.storage.MessageStore
-import org.disastermesh.app.mesh.routing.RouteCoordinator
 import org.disastermesh.app.mesh.routing.AdaptiveRouteEvaluator
 import org.disastermesh.app.mesh.metrics.MetricsCollector
 import org.disastermesh.app.mesh.identity.LocalNodeIdentity
@@ -20,6 +19,7 @@ import android.os.Handler
 import android.os.Looper
 import org.disastermesh.core.logging.MeshLogger
 import org.disastermesh.core.messaging.MessageRetryPolicy
+import org.disastermesh.core.routing.RouteCoordinator
 import org.json.JSONObject
 import org.json.JSONArray
 import java.util.UUID
@@ -53,11 +53,16 @@ class MeshChannelHandler(
     }
     private val routeEvaluator = AdaptiveRouteEvaluator(context.applicationContext)
     private val transport = MeshTransport(
+        context = context.applicationContext,
         localNodeId = localNodeId,
         logger = logger,
         onStateChanged = { state, error ->
             emit("TransportChanged", mapOf("state" to state, "error" to error))
-            routeCoordinator.transportChanged(state, connection.connectedPeerId)
+            if (state == "disconnected" && !connection.isConnected) {
+                routeCoordinator.connectionChanged("disconnected", null)
+            } else {
+                routeCoordinator.transportChanged(state, connection.connectedPeerId)
+            }
             if (state == "connected") {
                 retryPendingMessages()
             } else if (state == "disconnected" || state == "failed") {
@@ -65,7 +70,11 @@ class MeshChannelHandler(
                 messageStore.markAllQueued().forEach { id ->
                     emit("MessageStatusChanged", mapOf("id" to id, "status" to "queued"))
                 }
-                scheduleLinkRecovery()
+                if (connection.isConnected) {
+                    scheduleLinkRecovery()
+                } else {
+                    recoveryHandler.removeCallbacksAndMessages(null)
+                }
             }
             emitMetrics()
         },
@@ -105,6 +114,7 @@ class MeshChannelHandler(
         onLocalDeviceIdChanged = { address ->
             emit("LocalDeviceChanged", mapOf("nodeId" to localNodeId, "transportAddress" to address))
         },
+        retainedPeerId = { connection.connectedPeerId },
     )
     private var eventSink: EventChannel.EventSink? = null
     private var running = false
@@ -136,7 +146,7 @@ class MeshChannelHandler(
             }
             "discoverPeers" -> {
                 logger.info("peer_discovery_requested")
-                discovery.discover()
+                discovery.discover(force = true)
                 result.success(null)
             }
             "connectPeer" -> {
@@ -181,6 +191,10 @@ class MeshChannelHandler(
                 val payload = call.argument<String>("payload")
                 if (destination.isNullOrBlank() || payload == null) {
                     result.error("INVALID_ARGUMENT", "destination and payload are required", null)
+                } else if (payload.isBlank()) {
+                    result.error("INVALID_ARGUMENT", "Message text cannot be empty", null)
+                } else if (payload.toByteArray(Charsets.UTF_8).size > MAX_PAYLOAD_BYTES) {
+                    result.error("PAYLOAD_TOO_LARGE", "Message exceeds the 8 KiB limit", null)
                 } else {
                     val transportAddress = normalizeNodeId(destination)
                     val protocolDestination = if (
@@ -228,7 +242,9 @@ class MeshChannelHandler(
                         "latencyMs" to 0.0,
                         "packetLoss" to 0.0,
                         "load" to 0.0,
-                        "lastSeen" to java.time.Instant.now().toString(),
+                        "lastSeen" to java.time.Instant.ofEpochMilli(
+                            discovery.lastSeenAt(peer.deviceAddress) ?: System.currentTimeMillis(),
+                        ).toString(),
                         "status" to peerStatus(peer.deviceAddress),
                     )
                 }
@@ -317,8 +333,22 @@ class MeshChannelHandler(
         pendingStart = false
         pendingConnectPeerId = null
         if (!granted) {
+            val permissionError = if (Build.VERSION.SDK_INT >= 33) {
+                "Nearby Wi-Fi permission was denied. Allow it in app settings to discover and connect to Wi-Fi Direct peers."
+            } else {
+                "Precise Location permission was denied. Allow it and turn on Location services to discover Wi-Fi Direct peers."
+            }
+            logger.warn("mesh_permission_denied", mapOf("apiLevel" to Build.VERSION.SDK_INT))
             if (shouldStart) {
-                emit("MeshStatusChanged", mapOf("running" to false, "discovering" to false, "state" to "permission_denied"))
+                emit(
+                    "MeshStatusChanged",
+                    mapOf(
+                        "running" to false,
+                        "discovering" to false,
+                        "state" to "permission_denied",
+                        "error" to permissionError,
+                    ),
+                )
             }
             peerToConnect?.let(connection::connect)
             return
@@ -353,7 +383,9 @@ class MeshChannelHandler(
                 "latencyMs" to 0.0,
                 "packetLoss" to 0.0,
                 "load" to 0.0,
-                "lastSeen" to java.time.Instant.now().toString(),
+                "lastSeen" to java.time.Instant.ofEpochMilli(
+                    discovery.lastSeenAt(peer.deviceAddress) ?: System.currentTimeMillis(),
+                ).toString(),
                 "status" to peerStatus(peer.deviceAddress),
             )
         }
@@ -365,8 +397,10 @@ class MeshChannelHandler(
             normalizeNodeId(connection.connectedPeerId.orEmpty()) == normalizeNodeId(peerId)
         ) {
             "connected"
-        } else {
+        } else if (discovery.isRecentlySeen(peerId)) {
             "nearby"
+        } else {
+            "disconnected"
         }
 
     private fun handleEnvelope(envelope: JSONObject) {
@@ -640,12 +674,14 @@ class MeshChannelHandler(
     }
 
     private fun scheduleLinkRecovery() {
+        if (!running) return
         val peerId = connection.connectedPeerId ?: return
-        routeCoordinator.connectionChanged("failed", peerId)
         recoveryHandler.removeCallbacksAndMessages(null)
+        logger.warn("mesh_link_recovery_scheduled", mapOf("peerId" to peerId, "delayMs" to RECOVERY_DELAY_MS))
         recoveryHandler.postDelayed(
             {
-                if (connection.isConnected) {
+                if (running && connection.isConnected && connection.connectedPeerId == peerId) {
+                    logger.info("mesh_link_recovery_refresh", mapOf("peerId" to peerId))
                     connection.refreshConnectionInfo()
                 }
             },

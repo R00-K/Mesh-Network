@@ -43,7 +43,10 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
       return;
     }
     final text = _payload.text;
-    if (text.trim().isEmpty) return;
+    if (text.trim().isEmpty) {
+      _showMessage('Enter a message before sending.');
+      return;
+    }
     setState(() => _sending = true);
     try {
       final result = await ref.read(meshChannelProvider).sendMessage(
