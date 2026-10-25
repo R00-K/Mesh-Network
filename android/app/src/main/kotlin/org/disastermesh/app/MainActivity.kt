@@ -26,13 +26,20 @@ class MainActivity : FlutterActivity() {
             mapOf("nodeId" to configuration.localNodeId.toString()),
         )
         val handler = MeshChannelHandler(this, AndroidMeshLogger()) {
-            val permissions = buildList {
-                add(Manifest.permission.ACCESS_FINE_LOCATION)
-                add(Manifest.permission.ACCESS_COARSE_LOCATION)
-                if (android.os.Build.VERSION.SDK_INT >= 33) {
-                    add(Manifest.permission.NEARBY_WIFI_DEVICES)
-                }
-            }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+            // Android 13+ gates Wi-Fi Direct discovery on Nearby Wi-Fi. Older
+            // releases gate it on location, so don't require both permission
+            // families on newer devices.
+            val requiredPermissions = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                listOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+            } else {
+                listOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                )
+            }
+            val permissions = requiredPermissions.filter {
+                checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+            }
             if (permissions.isNotEmpty()) {
                 requestPermissions(permissions.toTypedArray(), 2402)
             } else {
@@ -60,8 +67,13 @@ class MainActivity : FlutterActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 2402) {
             meshHandler?.onPermissionsResult(
-                granted = grantResults.isNotEmpty() &&
-                    grantResults.all { it == PackageManager.PERMISSION_GRANTED },
+                granted = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES) ==
+                        PackageManager.PERMISSION_GRANTED
+                } else {
+                    checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+                        PackageManager.PERMISSION_GRANTED
+                },
             )
         }
     }

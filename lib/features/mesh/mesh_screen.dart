@@ -47,6 +47,10 @@ class MeshScreen extends ConsumerWidget {
           'Discovery: ${state.isDiscovering ? 'active' : 'inactive'}  •  '
           'Connected peers: ${state.connectedPeerCount}',
         ),
+        if (state.discoveryError.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(state.discoveryError, style: TextStyle(color: colors.error)),
+        ],
         const SizedBox(height: 16),
         Align(
           alignment: Alignment.centerLeft,
@@ -104,7 +108,9 @@ class MeshScreen extends ConsumerWidget {
                     if (transportReady)
                       Text('Node ID: ${state.connectionPeerNodeId}')
                     else if (isConnecting)
-                      const Text('Verifying peer identity…')
+                      Text(state.transportError.isEmpty
+                          ? 'Verifying peer identity…'
+                          : 'Retrying connection: ${state.transportError}')
                     else if (isCurrentPeer &&
                         state.connectionState == 'connected' &&
                         state.transportState == 'failed')
@@ -118,7 +124,9 @@ class MeshScreen extends ConsumerWidget {
                         state.transportState == 'disconnected')
                       const Text('Messaging link is not connected. Disconnect, then reconnect.')
                     else if (isCurrentPeer && state.connectionState == 'failed')
-                      const Text('Connection failed. Try again.'),
+                      Text(state.transportError.isEmpty
+                          ? 'Connection failed. Try again.'
+                          : state.transportError),
                   ],
                 ),
                 isThreeLine: transportReady || isConnecting,

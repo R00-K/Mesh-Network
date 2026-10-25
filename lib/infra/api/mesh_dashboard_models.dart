@@ -74,6 +74,7 @@ class MeshDashboardState {
   const MeshDashboardState({
     this.isActive = false,
     this.isDiscovering = false,
+    this.discoveryError = '',
     this.simulationEnabled = true,
     this.nodes = const [],
     this.nativePeers = const [],
@@ -99,6 +100,7 @@ class MeshDashboardState {
 
   final bool isActive;
   final bool isDiscovering;
+  final String discoveryError;
   final bool simulationEnabled;
   final List<MeshNode> nodes;
   final List<Peer> nativePeers;
@@ -166,6 +168,7 @@ class MeshDashboardState {
   MeshDashboardState copyWith({
     bool? isActive,
     bool? isDiscovering,
+    String? discoveryError,
     bool? simulationEnabled,
     List<MeshNode>? nodes,
     List<Peer>? nativePeers,
@@ -191,6 +194,7 @@ class MeshDashboardState {
     return MeshDashboardState(
       isActive: isActive ?? this.isActive,
       isDiscovering: isDiscovering ?? this.isDiscovering,
+      discoveryError: discoveryError ?? this.discoveryError,
       simulationEnabled: simulationEnabled ?? this.simulationEnabled,
       nodes: nodes ?? this.nodes,
       nativePeers: nativePeers ?? this.nativePeers,

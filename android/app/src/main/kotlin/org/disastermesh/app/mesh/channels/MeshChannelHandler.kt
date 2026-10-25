@@ -79,14 +79,14 @@ class MeshChannelHandler(
         WifiDirectConnectionManager(
         context = context.applicationContext,
         logger = logger,
-        onStateChanged = { state, peerId ->
+        onStateChanged = { state, peerId, error ->
             if (state == "connected") {
                 transport.start(connection.isGroupOwner, connection.groupOwnerAddress)
             } else if (state == "disconnected" || state == "failed") {
                 transport.stop()
             }
             routeCoordinator.connectionChanged(state, peerId)
-            emit("ConnectionChanged", mapOf("state" to state, "peerId" to peerId))
+            emit("ConnectionChanged", mapOf("state" to state, "peerId" to peerId, "error" to error))
             emitPeers()
         },
         )
@@ -97,6 +97,9 @@ class MeshChannelHandler(
         onDiscoveryStateChanged = { active ->
             emit("MeshStatusChanged", mapOf("running" to running, "discovering" to active))
         },
+        onDiscoveryError = { error ->
+            emit("MeshStatusChanged", mapOf("running" to running, "error" to error))
+        },
         onPeersChanged = { emitPeers() },
         onConnectionChanged = { connection.refreshConnectionInfo() },
         onLocalDeviceIdChanged = { address ->
@@ -106,6 +109,7 @@ class MeshChannelHandler(
     private var eventSink: EventChannel.EventSink? = null
     private var running = false
     private var pendingStart = false
+    private var pendingConnectPeerId: String? = null
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -140,7 +144,8 @@ class MeshChannelHandler(
                 if (peerId.isNullOrBlank()) {
                     result.error("INVALID_ARGUMENT", "peerId is required", null)
                 } else {
-                    connection.connect(peerId)
+                    pendingConnectPeerId = peerId
+                    requestPermissions()
                     logger.info("connect_peer", mapOf("peerId" to peerId))
                     result.success(null)
                 }
@@ -306,26 +311,35 @@ class MeshChannelHandler(
     }
 
     fun onPermissionsResult(granted: Boolean) {
-        if (!pendingStart) return
+        if (!pendingStart && pendingConnectPeerId == null) return
+        val shouldStart = pendingStart
+        val peerToConnect = pendingConnectPeerId
         pendingStart = false
+        pendingConnectPeerId = null
         if (!granted) {
-            emit("MeshStatusChanged", mapOf("running" to false, "discovering" to false, "state" to "permission_denied"))
+            if (shouldStart) {
+                emit("MeshStatusChanged", mapOf("running" to false, "discovering" to false, "state" to "permission_denied"))
+            }
+            peerToConnect?.let(connection::connect)
             return
         }
-        running = true
-        discovery.start()
-        connection.refreshConnectionInfo()
-        schedulePendingExpiries()
-        metricsHandler.removeCallbacksAndMessages(null)
-        metricsHandler.post(metricsRunnable)
-        val serviceIntent = Intent(context, MeshForegroundService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+        if (shouldStart) {
+            running = true
+            discovery.start()
+            connection.refreshConnectionInfo()
+            schedulePendingExpiries()
+            metricsHandler.removeCallbacksAndMessages(null)
+            metricsHandler.post(metricsRunnable)
+            val serviceIntent = Intent(context, MeshForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+            logger.info("mesh_started")
+            emit("MeshStatusChanged", mapOf("running" to true, "discovering" to discovery.isDiscovering, "state" to "discovering"))
         }
-        logger.info("mesh_started")
-        emit("MeshStatusChanged", mapOf("running" to true, "discovering" to discovery.isDiscovering, "state" to "discovering"))
+        peerToConnect?.let(connection::connect)
     }
 
     private fun emitPeers() {
@@ -410,17 +424,12 @@ class MeshChannelHandler(
             envelope.opt("payload") !is String ||
             payload.toByteArray(Charsets.UTF_8).size > MAX_PAYLOAD_BYTES ||
             createdAt <= 0 ||
-            createdAt > System.currentTimeMillis() + MAX_CLOCK_SKEW_MS ||
             expiresAt <= createdAt ||
             expiresAt > createdAt + MESSAGE_EXPIRY_MS ||
             source != transport.peerNodeId?.let(::normalizeNodeId) ||
             destination != localNodeId
         ) {
             logger.warn("mesh_envelope_rejected", mapOf("reason" to "invalid_message", "id" to id))
-            return
-        }
-        if (expiresAt <= System.currentTimeMillis()) {
-            logger.warn("mesh_envelope_rejected", mapOf("reason" to "expired", "id" to id))
             return
         }
         when (messageStore.acceptIncoming(envelope)) {
@@ -610,7 +619,7 @@ class MeshChannelHandler(
 
     private fun validCommonEnvelope(envelope: JSONObject): Boolean =
         envelope.optInt("protocolVersion", -1) == PROTOCOL_VERSION &&
-            envelope.optLong("createdAt", -1L) in 1..(System.currentTimeMillis() + MAX_CLOCK_SKEW_MS)
+            envelope.optLong("createdAt", -1L) > 0
 
     private fun isNodeId(value: String): Boolean = try {
         UUID.fromString(value).toString() == value.lowercase()
@@ -662,6 +671,5 @@ class MeshChannelHandler(
         const val MAX_PAYLOAD_BYTES = 8 * 1024
         const val MAX_SEND_ATTEMPTS = MessageRetryPolicy.MAX_SEND_ATTEMPTS
         const val MESSAGE_EXPIRY_MS = 24 * 60 * 60 * 1_000L
-        const val MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000L
     }
 }

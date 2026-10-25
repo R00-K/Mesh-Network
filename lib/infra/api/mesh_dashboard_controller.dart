@@ -216,6 +216,7 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
       state = state.copyWith(
         isActive: payload['running'] as bool? ?? state.isActive,
         isDiscovering: payload['discovering'] as bool? ?? state.isDiscovering,
+        discoveryError: payload['error'] as String? ?? state.discoveryError,
       );
     } else if (event['type'] == 'TransportChanged') {
       final transportState = payload['state'] as String? ?? state.transportState;
@@ -224,8 +225,8 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
         connectionState: transportState == 'connected'
             ? 'connected'
             : state.connectionState,
-        transportError: transportState == 'connecting' ||
-                transportState == 'connected'
+        transportError: transportState == 'connected' &&
+                state.connectionPeerNodeId.isNotEmpty
             ? ''
             : payload['error'] as String? ?? state.transportError,
       );
@@ -239,7 +240,7 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
       state = state.copyWith(
         connectionState: connectionState,
         connectionPeerAddress:
-            connectionState == 'disconnected' || connectionState == 'failed'
+            connectionState == 'disconnected'
                 ? ''
                 : payload['peerId'] as String? ?? state.connectionPeerAddress,
         connectionPeerNodeId: connectionState == 'connecting' ||
@@ -247,6 +248,10 @@ class MeshDashboardController extends AutoDisposeNotifier<MeshDashboardState>
                 connectionState == 'failed'
             ? ''
             : state.connectionPeerNodeId,
+        transportError: connectionState == 'connecting' &&
+                payload['error'] == null
+            ? ''
+            : payload['error'] as String? ?? state.transportError,
       );
     } else if (event['type'] == 'PeerIdentityChanged') {
       final nodeId = payload['nodeId'] as String? ?? '';

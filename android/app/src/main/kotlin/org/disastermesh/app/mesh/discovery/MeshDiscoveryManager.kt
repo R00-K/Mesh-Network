@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
@@ -19,6 +20,7 @@ class MeshDiscoveryManager(
     private val context: Context,
     private val logger: MeshLogger,
     private val onDiscoveryStateChanged: (Boolean) -> Unit = {},
+    private val onDiscoveryError: (String) -> Unit = {},
     private val onPeersChanged: () -> Unit = {},
     private val onConnectionChanged: () -> Unit = {},
     private val onLocalDeviceIdChanged: (String) -> Unit = {},
@@ -77,9 +79,16 @@ class MeshDiscoveryManager(
         peerRefreshHandler.removeCallbacks(discoveryRetry)
         if (!hasDiscoveryPermission()) {
             logger.warn("discovery_permission_missing")
+            onDiscoveryError("Allow Nearby Wi-Fi (Android 13+) or Location (older Android) permission to discover peers.")
             return
         }
-        manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
+        if (!isLocationEnabled()) {
+            onDiscoveryError("Turn on Location services in Android Settings to use Wi-Fi Direct discovery.")
+            return
+        }
+        onDiscoveryError("")
+        try {
+            manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 isDiscovering = true
                 peerRefreshHandler.removeCallbacks(discoveryRetry)
@@ -91,17 +100,29 @@ class MeshDiscoveryManager(
                 isDiscovering = false
                 onDiscoveryStateChanged(false)
                 logger.warn("discovery_failed", mapOf("reason" to reason))
+                onDiscoveryError("Android could not start Wi-Fi Direct discovery (reason $reason). Check that Wi-Fi is on and try again.")
                 if (registered) {
                     peerRefreshHandler.removeCallbacks(discoveryRetry)
                     peerRefreshHandler.postDelayed(discoveryRetry, DISCOVERY_RETRY_DELAY_MS)
                 }
             }
-        })
+            })
+        } catch (error: SecurityException) {
+            isDiscovering = false
+            onDiscoveryStateChanged(false)
+            logger.warn("discovery_security_exception", mapOf("error" to (error.message ?: "permission denied")))
+            onDiscoveryError("Android denied Wi-Fi Direct discovery. Check Nearby Wi-Fi permission and Location services.")
+        }
     }
 
     internal fun requestPeers() {
         if (!hasDiscoveryPermission()) return
-        manager.requestPeers(channel) { devices -> updatePeers(devices.deviceList) }
+        try {
+            manager.requestPeers(channel) { devices -> updatePeers(devices.deviceList) }
+        } catch (error: SecurityException) {
+            logger.warn("peer_list_permission_failed", mapOf("error" to (error.message ?: "permission denied")))
+            onDiscoveryError("Android denied access to the Wi-Fi Direct peer list. Check Nearby Wi-Fi permission and Location services.")
+        }
     }
 
     internal fun requestLocalDevice() {
@@ -119,16 +140,27 @@ class MeshDiscoveryManager(
     }
 
     private fun hasDiscoveryPermission(): Boolean {
-        val locationGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
-        val nearbyGranted = Build.VERSION.SDK_INT < 33 ||
+        return if (Build.VERSION.SDK_INT >= 33) {
             ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.NEARBY_WIFI_DEVICES,
             ) == PackageManager.PERMISSION_GRANTED
-        return locationGranted && nearbyGranted
+        } else {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun isLocationEnabled(): Boolean {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            locationManager.isLocationEnabled
+        } else {
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
     }
 
     private fun filter() = IntentFilter().apply {

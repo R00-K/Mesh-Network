@@ -172,6 +172,7 @@ class MeshTransport(
             synchronized(this) {
                 if (generation == expectedGeneration) connectLoopGeneration = null
             }
+            lastError = lastConnectError
             emitState("failed", lastConnectError)
             scheduleClientReconnect(expectedGeneration)
         }
@@ -241,11 +242,17 @@ class MeshTransport(
 
     private fun acceptHello(link: Link, envelope: JSONObject) {
         val nodeId = envelope.optString("nodeId")
-        if (envelope.optString("type") != "hello" ||
-            envelope.optInt("protocolVersion", -1) != PROTOCOL_VERSION ||
-            !isNodeId(nodeId) || nodeId == localNodeId
-        ) {
-            throw IllegalArgumentException("Invalid mesh hello")
+        if (envelope.optString("type") != "hello") {
+            throw IllegalArgumentException("Peer did not send a mesh hello")
+        }
+        val peerProtocolVersion = envelope.optInt("protocolVersion", -1)
+        if (peerProtocolVersion != PROTOCOL_VERSION) {
+            throw IllegalArgumentException(
+                "Incompatible mesh protocol: this app uses $PROTOCOL_VERSION, peer uses $peerProtocolVersion",
+            )
+        }
+        if (!isNodeId(nodeId) || nodeId == localNodeId) {
+            throw IllegalArgumentException("Peer sent an invalid or duplicate device identity")
         }
         synchronized(this) {
             if (generation != link.generation || link.peerNodeId != null) return
@@ -313,7 +320,12 @@ class MeshTransport(
             }
         }
         if (links.none { it.peerNodeId != null }) {
-            emitState(if (hasPendingLink) "connecting" else "disconnected")
+            val stateAfterRemoval = when {
+                currentState == "failed" -> "failed"
+                hasPendingLink -> "connecting"
+                else -> "disconnected"
+            }
+            emitState(stateAfterRemoval, if (stateAfterRemoval == "failed") lastError else null)
         }
     }
 
@@ -332,7 +344,6 @@ class MeshTransport(
                     links.any { it.generation == expectedGeneration }
                 ) return@synchronized
                 connectLoopGeneration = expectedGeneration
-                lastError = null
                 emitState("connecting")
                 executor.execute { connectWithRetry(address, expectedGeneration) }
             }
